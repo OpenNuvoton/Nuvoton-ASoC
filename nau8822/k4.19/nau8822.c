@@ -232,8 +232,8 @@ static int nau8822_eq_put(struct snd_kcontrol *kcontrol,
 		ret = snd_soc_component_write(component, reg + i, value);
 		if (ret) {
 			dev_err(component->dev,
-				"EQ configuration fail, register: %x ret: %d\n",
-				reg + i, ret);
+			    "EQ configuration fail, register: %x ret: %d\n",
+			    reg + i, ret);
 			kfree(data);
 			return ret;
 		}
@@ -1062,7 +1062,6 @@ static const struct snd_soc_component_driver soc_component_dev_nau8822 = {
 	.dapm_routes			= nau8822_dapm_routes,
 	.num_dapm_routes		= ARRAY_SIZE(nau8822_dapm_routes),
 	.idle_bias_on			= 1,
-	.suspend_bias_off		= 1,
 	.use_pmdown_time		= 1,
 	.endianness			= 1,
 	.non_legacy_dai_naming		= 1,
