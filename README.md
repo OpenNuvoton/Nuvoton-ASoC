@@ -9,10 +9,10 @@ x:none , o:ok (sync newest version)
 |NAU8315     |x      |x      |x      |x      |x      |x      |x      |x      |upstreame at k5.11|
 |NAU85L40    |x      |x      |x      |x      |x      |x      |x      |o      |upstreame at 4.11|
 |NAU88C10    |o      |x      |x      |x      |o      |o      |o      |o      |upstreame at 4.9|
-|NAU88L21    |x      |x      |x      |x      |o      |x      |o      |o      |upstreame|
+|NAU88L21    |x      |x      |x      |x      |o      |o      |o      |o      |upstreame|
 |NAU88C22    |x      |x      |x      |x      |o      |o      |o      |o      |upstreame at 4.20|
-|NAU88L24    |x      |x      |x      |x      |o      |x      |o      |o      |upstreame at 4.12|
-|NAU88L25    |x      |x      |x      |x      |o      |x      |o      |o      |upstreame at k4.4|
+|NAU88L24    |x      |x      |x      |x      |o      |o      |o      |o      |upstreame at 4.12|
+|NAU88L25    |x      |x      |x      |x      |o      |o      |o      |o      |upstreame at k4.4|
 |NAU83G10/20 |x      |x      |x      |x      |x      |x      |x      |x      ||
 
 k5.10: https://elixir.bootlin.com/linux/v5.10.70/source/sound/soc/codecs
