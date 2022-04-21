@@ -21,7 +21,6 @@
 #include <linux/i2c.h>
 #include <linux/regmap.h>
 #include <linux/slab.h>
-#include <linux/math64.h>
 #include <sound/core.h>
 #include <sound/pcm.h>
 #include <sound/pcm_params.h>
@@ -177,7 +176,13 @@ static const struct soc_enum nau8810_deemp_enum =
 	SOC_ENUM_SINGLE(NAU8810_REG_DAC, NAU8810_DEEMP_SFT,
 		ARRAY_SIZE(nau8810_deemp), nau8810_deemp);
 
-static const char * const nau8810_alc[] = { "Normal", "Limiter" };
+static const char * const nau8810_eqmode[] = {"Capture", "Playback" };
+
+static const struct soc_enum nau8810_eqmode_enum =
+	SOC_ENUM_SINGLE(NAU8810_REG_EQ1, NAU8810_EQM_SFT,
+		ARRAY_SIZE(nau8810_eqmode), nau8810_eqmode);
+
+static const char * const nau8810_alc[] = {"Normal", "Limiter" };
 
 static const struct soc_enum nau8810_alc_enum =
 	SOC_ENUM_SINGLE(NAU8810_REG_ALC3, NAU8810_ALCM_SFT,
@@ -192,6 +197,8 @@ static const struct snd_kcontrol_new nau8810_snd_controls[] = {
 	SOC_ENUM("ADC Companding", nau8810_companding_adc_enum),
 	SOC_ENUM("DAC Companding", nau8810_companding_dac_enum),
 	SOC_ENUM("DAC De-emphasis", nau8810_deemp_enum),
+
+	SOC_ENUM("EQ Function", nau8810_eqmode_enum),
 
 	SOC_SINGLE("DAC Inversion Switch", NAU8810_REG_DAC,
 		NAU8810_DACPL_SFT, 1, 0),
@@ -483,7 +490,7 @@ static int nau8810_calc_pll(unsigned int pll_in,
 }
 
 static int nau8810_set_pll(struct snd_soc_dai *codec_dai, int pll_id,
-		int source, unsigned int freq_in, unsigned int freq_out)
+	int source, unsigned int freq_in, unsigned int freq_out)
 {
 	struct snd_soc_codec *codec = codec_dai->codec;
 	struct nau8810 *nau8810 = snd_soc_codec_get_drvdata(codec);
@@ -636,16 +643,16 @@ static int nau8810_pcm_hw_params(struct snd_pcm_substream *substream,
 			NAU8810_BCLKSEL_MASK, bclk_div);
 	}
 
-	switch (params_format(params)) {
-	case SNDRV_PCM_FORMAT_S16_LE:
+	switch (params_width(params)) {
+	case 16:
 		break;
-	case SNDRV_PCM_FORMAT_S20_3LE:
+	case 20:
 		val_len |= NAU8810_WLEN_20;
 		break;
-	case SNDRV_PCM_FORMAT_S24_LE:
+	case 24:
 		val_len |= NAU8810_WLEN_24;
 		break;
-	case SNDRV_PCM_FORMAT_S32_LE:
+	case 32:
 		val_len |= NAU8810_WLEN_32;
 		break;
 	}
@@ -777,7 +784,6 @@ static const struct regmap_config nau8810_regmap_config = {
 
 static struct snd_soc_codec_driver nau8810_codec_driver = {
 	.set_bias_level = nau8810_set_bias_level,
-
 	.controls = nau8810_snd_controls,
 	.num_controls = ARRAY_SIZE(nau8810_snd_controls),
 	.dapm_widgets = nau8810_dapm_widgets,
@@ -787,7 +793,7 @@ static struct snd_soc_codec_driver nau8810_codec_driver = {
 };
 
 static int nau8810_i2c_probe(struct i2c_client *i2c,
-		    const struct i2c_device_id *id)
+			    const struct i2c_device_id *id)
 {
 	struct device *dev = &i2c->dev;
 	struct nau8810 *nau8810 = dev_get_platdata(dev);
@@ -808,6 +814,13 @@ static int nau8810_i2c_probe(struct i2c_client *i2c,
 
 	return snd_soc_register_codec(dev,
 		&nau8810_codec_driver, &nau8810_dai, 1);
+}
+
+static int nau8810_i2c_remove(struct i2c_client *client)
+{
+	snd_soc_unregister_codec(&client->dev);
+
+	return 0;
 }
 
 static const struct i2c_device_id nau8810_i2c_id[] = {
@@ -834,6 +847,7 @@ static struct i2c_driver nau8810_i2c_driver = {
 		.of_match_table = of_match_ptr(nau8810_of_match),
 	},
 	.probe =    nau8810_i2c_probe,
+	.remove =   nau8810_i2c_remove,
 	.id_table = nau8810_i2c_id,
 };
 
