@@ -7,7 +7,7 @@ x:none , o:ok (sync newest version)
 |Kernel      |k3.4   |k3.10  |k3.14  |k3.18  |k3.19  |k4.4-15|k4.18  |k4.19  |k5.10  |note|
 |------------|-------|-------|-------|-------|-------|-------|-------|-------|-------|----------|
 |NAU8315     |x      |x      |x      |x      |x      |x      |x      |x      |x      |upstream at k5.11|
-|NAU85L40    |x      |x      |x      |x      |x      |x      |x      |x      |o      |upstream at 4.11|
+|NAU85L40    |o      |o      |o      |o      |o      |o      |o      |o      |o      |upstream at 4.11|
 |NAU88C10    |o      |o      |o      |o      |o      |o      |o      |o      |o      |upstream at 4.9|
 |NAU88L21    |o      |o      |o      |o      |o      |o      |o      |o      |o      |upstream|
 |NAU88C22    |o      |o      |o      |o      |o      |o      |o      |o      |o      |upstream at 4.20|
