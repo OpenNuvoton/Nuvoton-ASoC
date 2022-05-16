@@ -395,16 +395,16 @@ static int nau8540_hw_params(struct snd_pcm_substream *substream,
 		osr_adc_sel[osr].clk_src << NAU8540_CLK_ADC_SRC_SFT);
 
 	switch (params_width(params)) {
-	case SNDRV_PCM_FORMAT_S16_LE:
+	case 16:
 		val_len |= NAU8540_I2S_DL_16;
 		break;
-	case SNDRV_PCM_FORMAT_S20_3LE:
+	case 20:
 		val_len |= NAU8540_I2S_DL_20;
 		break;
-	case SNDRV_PCM_FORMAT_S24_LE:
+	case 24:
 		val_len |= NAU8540_I2S_DL_24;
 		break;
-	case SNDRV_PCM_FORMAT_S32_LE:
+	case 32:
 		val_len |= NAU8540_I2S_DL_32;
 		break;
 	default:

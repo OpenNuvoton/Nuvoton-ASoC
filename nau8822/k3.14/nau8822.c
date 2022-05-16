@@ -777,16 +777,16 @@ static int nau8822_hw_params(struct snd_pcm_substream *substream,
 				NAU8822_BCLKSEL_MASK, bclk_div);
 	}
 
-	switch (params_format(params)) {
-	case SNDRV_PCM_FORMAT_S16_LE:
+	switch (params_width(params)) {
+	case 16:
 		break;
-	case SNDRV_PCM_FORMAT_S20_3LE:
+	case 20:
 		val_len |= NAU8822_WLEN_20;
 		break;
-	case SNDRV_PCM_FORMAT_S24_LE:
+	case 24:
 		val_len |= NAU8822_WLEN_24;
 		break;
-	case SNDRV_PCM_FORMAT_S32_LE:
+	case 32:
 		val_len |= NAU8822_WLEN_32;
 		break;
 	default:
