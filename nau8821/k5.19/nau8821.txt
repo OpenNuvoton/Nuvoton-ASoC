@@ -35,7 +35,7 @@ Optional properties:
 
   - clocks: list of phandle and clock specifier pairs according to common clock bindings for the
       clocks described in clock-names
-  - clock-names: should include "mclk" for the MCLK master clock
+  - clock-names: should include "mclk" for the MCLK master clock.
 
 Example:
 
