@@ -1,0 +1,37 @@
+Nuvoton NAU88L11 audio codec
+
+This device supports I2C only.
+
+Required properties:
+  - compatible : Must be "nuvoton,nau8811"
+
+  - reg : the I2C address of the device.
+
+Optional properties:
+  - nuvoton,vref-impedance: VREF Impedance selection
+      0 - Open
+      1 - 25 kOhm
+      2 - 125 kOhm
+      3 - 2.5 kOhm
+
+  - nuvoton,micbias-voltage: Micbias voltage level.
+      0 - VDDA
+      1 - VDDA * 1.1
+      2 - VDDA * 1.2
+      3 - VDDA * 1.3
+      4 - VDDA * 1.4
+      5 - VDDA * 1.53
+
+  - nuvoton,dmic-clk-threshold: the ADC threshold of DMIC clock.
+
+Example:
+
+codec: nau8811@1b {
+	compatible = "nuvoton,nau8811";
+	reg = <0x1b>;
+	/* VREF Impedance = 125 kOhm */
+	nuvoton,vref-impedance = <2>;
+	/* VDDA(1.8) * 1.40 = 2.52 */
+	nuvoton,micbias-voltage = <4>;
+	nuvoton,dmic-clk-threshold = <3072000>;
+};
