@@ -1,2 +1,0 @@
-Please refer to the link:
-https://elixir.bootlin.com/linux/v5.11/source/sound/soc/codecs/nau8315.c
