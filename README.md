@@ -6,7 +6,7 @@ The Nuvoton-ASoC repository stores the Linux driver for codec and amplifier manu
 x:none , o:ok (sync newest version)
 |Kernel                        |k3.4   |k3.10  |k3.14  |k3.18  |k3.19  |k4.4-15|k4.18  |k4.19  |k5.10  |k5.19  |note|
 |------------------------------|-------|-------|-------|-------|-------|-------|-------|-------|-------|-------|----------|
-|NAU8315                       |o      |o      |o      |o      |o      |o      |o      |o      |o      |x      |upstream at 5.11|
+|NAU8315/NAU8318               |o      |o      |o      |o      |o      |o      |o      |o      |o      |o      |upstream at 5.11|
 |NAU8325                       |x      |x      |x      |x      |x      |x      |x      |x      |x      |x      ||
 |NAU85L40                      |o      |o      |o      |o      |o      |o      |o      |o      |o      |o      |upstream at 4.11|
 |NAU88C10/NAU88C12/NAU88C14    |o      |o      |o      |o      |o      |o      |o      |o      |o      |x      |upstream at 4.9 |
