@@ -186,10 +186,22 @@ static const struct soc_enum nau8822_companding_dac_enum =
 		ARRAY_SIZE(nau8822_companding), nau8822_companding);
 
 static const char * const nau8822_eqmode[] = {"Capture", "Playback"};
+static const char * const nau8822_bw[] = {"Narrow", "Wide"};
+static const char * const nau8822_eq1[] = {"80Hz", "105Hz", "135Hz", "175Hz"};
+static const char * const nau8822_eq2[] = {"230Hz", "300Hz", "385Hz", "500Hz"};
+static const char * const nau8822_eq3[] = {"650Hz", "850Hz", "1.1kHz", "1.4kHz"};
+static const char * const nau8822_eq4[] = {"1.8kHz", "2.4kHz", "3.2kHz", "4.1kHz"};
+static const char * const nau8822_eq5[] = {"5.3kHz", "6.9kHz", "9kHz", "11.7kHz"};
 
-static const struct soc_enum nau8822_eqmode_enum =
-	SOC_ENUM_SINGLE(NAU8822_REG_EQ1, NAU8822_EQM_SFT,
-		ARRAY_SIZE(nau8822_eqmode), nau8822_eqmode);
+static const SOC_ENUM_SINGLE_DECL(eqmode, NAU8822_REG_EQ1, 8, nau8822_eqmode);
+static const SOC_ENUM_SINGLE_DECL(eq1, NAU8822_REG_EQ1, 5, nau8822_eq1);
+static const SOC_ENUM_SINGLE_DECL(eq2bw, NAU8822_REG_EQ2, 8, nau8822_bw);
+static const SOC_ENUM_SINGLE_DECL(eq2, NAU8822_REG_EQ2, 5, nau8822_eq2);
+static const SOC_ENUM_SINGLE_DECL(eq3bw, NAU8822_REG_EQ3, 8, nau8822_bw);
+static const SOC_ENUM_SINGLE_DECL(eq3, NAU8822_REG_EQ3, 5, nau8822_eq3);
+static const SOC_ENUM_SINGLE_DECL(eq4bw, NAU8822_REG_EQ4, 8, nau8822_bw);
+static const SOC_ENUM_SINGLE_DECL(eq4, NAU8822_REG_EQ4, 5, nau8822_eq4);
+static const SOC_ENUM_SINGLE_DECL(eq5, NAU8822_REG_EQ5, 5, nau8822_eq5);
 
 static const char * const nau8822_alc1[] = {"Off", "Right", "Left", "Both"};
 static const char * const nau8822_alc3[] = {"Normal", "Limiter"};
@@ -203,6 +215,7 @@ static const struct soc_enum nau8822_alc_mode_enum =
 		ARRAY_SIZE(nau8822_alc3), nau8822_alc3);
 
 static const DECLARE_TLV_DB_SCALE(digital_tlv, -12750, 50, 1);
+static const DECLARE_TLV_DB_SCALE(eq_tlv, -1200, 100, 0);
 static const DECLARE_TLV_DB_SCALE(inpga_tlv, -1200, 75, 0);
 static const DECLARE_TLV_DB_SCALE(spk_tlv, -5700, 100, 0);
 static const DECLARE_TLV_DB_SCALE(pga_boost_tlv, 0, 2000, 0);
@@ -213,7 +226,24 @@ static const struct snd_kcontrol_new nau8822_snd_controls[] = {
 	SOC_ENUM("ADC Companding", nau8822_companding_adc_enum),
 	SOC_ENUM("DAC Companding", nau8822_companding_dac_enum),
 
-	SOC_ENUM("EQ Function", nau8822_eqmode_enum),
+	SOC_ENUM("EQ Function", nau8822_eqmode),
+	SOC_ENUM("EQ1 Cut Off", nau8822_eq1),
+	SOC_SINGLE_TLV("EQ1 Volume", NAU8822_REG_EQ1,  0, 24, 1, eq_tlv),
+
+	SOC_ENUM("Equaliser EQ2 Bandwidth", nau8822_eq2bw),
+	SOC_ENUM("EQ2 Cut Off", nau8822_eq2),
+	SOC_SINGLE_TLV("EQ2 Volume", NAU8822_REG_EQ2,  0, 24, 1, eq_tlv),
+
+	SOC_ENUM("Equaliser EQ3 Bandwidth", nau8822_eq3bw),
+	SOC_ENUM("EQ3 Cut Off", nau8822_eq3),
+	SOC_SINGLE_TLV("EQ3 Volume", NAU8822_REG_EQ3,  0, 24, 1, eq_tlv),
+
+	SOC_ENUM("Equaliser EQ4 Bandwidth", nau8822_eq4bw),
+	SOC_ENUM("EQ4 Cut Off", nau8822_eq4),
+	SOC_SINGLE_TLV("EQ4 Volume", NAU8822_REG_EQ4,  0, 24, 1, eq_tlv),
+
+	SOC_ENUM("EQ5 Cut Off", nau8822_eq5),
+	SOC_SINGLE_TLV("EQ5 Volume", NAU8822_REG_EQ5, 0, 24, 1, eq_tlv),
 
 	SOC_DOUBLE("DAC Inversion Switch",
 		NAU8822_REG_DAC_CONTROL, 0, 1, 1, 0),
