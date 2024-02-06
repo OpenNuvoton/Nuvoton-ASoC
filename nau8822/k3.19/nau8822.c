@@ -236,8 +236,8 @@ static int nau8822_eq_put(struct snd_kcontrol *kcontrol,
 		ret = regmap_write(nau8822->regmap, reg + i, value);
 		if (ret) {
 			dev_err(codec->dev,
-			    "EQ configuration fail, register: %x ret: %d\n",
-			    reg + i, ret);
+				"EQ configuration fail, register: %x ret: %d\n",
+				reg + i, ret);
 			kfree(data);
 			return ret;
 		}
@@ -727,9 +727,19 @@ static int nau8822_set_pll(struct snd_soc_dai *dai, int pll_id, int source,
 {
 	struct snd_soc_codec *codec = dai->codec;
 	struct nau8822 *nau8822 = snd_soc_codec_get_drvdata(codec);
-	struct regmap *map = nau8822->regmap;
 	struct nau8822_pll *pll_param = &nau8822->pll;
 	int ret, fs;
+
+	if (freq_in == pll_param->freq_in &&
+	    freq_out == pll_param->freq_out)
+		return 0;
+
+	if (freq_out == 0) {
+		dev_dbg(codec->dev, "PLL disabled\n");
+		regmap_update_bits(nau8822->regmap,
+			NAU8822_REG_POWER_MANAGEMENT_1, NAU8822_PLL_EN_MASK, NAU8822_PLL_OFF);
+		return 0;
+	}
 
 	fs = freq_out / 256;
 
@@ -745,23 +755,28 @@ static int nau8822_set_pll(struct snd_soc_dai *dai, int pll_id, int source,
 		pll_param->pll_int, pll_param->pll_frac,
 		pll_param->mclk_scaler, pll_param->pre_factor);
 
-	regmap_update_bits(map,
+	regmap_update_bits(nau8822->regmap,
 		NAU8822_REG_PLL_N, NAU8822_PLLMCLK_DIV2 | NAU8822_PLLN_MASK,
 		(pll_param->pre_factor ? NAU8822_PLLMCLK_DIV2 : 0) |
 		pll_param->pll_int);
-	regmap_write(map,
+	regmap_write(nau8822->regmap,
 		NAU8822_REG_PLL_K1, (pll_param->pll_frac >> NAU8822_PLLK1_SFT) &
 		NAU8822_PLLK1_MASK);
-	regmap_write(map,
+	regmap_write(nau8822->regmap,
 		NAU8822_REG_PLL_K2, (pll_param->pll_frac >> NAU8822_PLLK2_SFT) &
 		NAU8822_PLLK2_MASK);
-	regmap_write(map,
+	regmap_write(nau8822->regmap,
 		NAU8822_REG_PLL_K3, pll_param->pll_frac & NAU8822_PLLK3_MASK);
-	regmap_update_bits(map,
+	regmap_update_bits(nau8822->regmap,
 		NAU8822_REG_CLOCKING, NAU8822_MCLKSEL_MASK,
 		pll_param->mclk_scaler << NAU8822_MCLKSEL_SFT);
-	regmap_update_bits(map,
+	regmap_update_bits(nau8822->regmap,
 		NAU8822_REG_CLOCKING, NAU8822_CLKM_MASK, NAU8822_CLKM_PLL);
+	regmap_update_bits(nau8822->regmap,
+		NAU8822_REG_POWER_MANAGEMENT_1, NAU8822_PLL_EN_MASK, NAU8822_PLL_ON);
+
+	pll_param->freq_in = freq_in;
+	pll_param->freq_out = freq_out;
 
 	return 0;
 }
@@ -927,37 +942,38 @@ static int nau8822_set_bias_level(struct snd_soc_codec *codec,
 				 enum snd_soc_bias_level level)
 {
 	struct nau8822 *nau8822 = snd_soc_codec_get_drvdata(codec);
-	struct regmap *map = nau8822->regmap;
 
 	switch (level) {
 	case SND_SOC_BIAS_ON:
 	case SND_SOC_BIAS_PREPARE:
-		regmap_update_bits(map,
+		regmap_update_bits(nau8822->regmap,
 			NAU8822_REG_POWER_MANAGEMENT_1,
 			NAU8822_REFIMP_MASK, NAU8822_REFIMP_80K);
 		break;
 
 	case SND_SOC_BIAS_STANDBY:
-		regmap_update_bits(map,
+		regmap_update_bits(nau8822->regmap,
 			NAU8822_REG_POWER_MANAGEMENT_1,
 			NAU8822_IOBUF_EN | NAU8822_ABIAS_EN,
 			NAU8822_IOBUF_EN | NAU8822_ABIAS_EN);
 
 		if (codec->dapm.bias_level == SND_SOC_BIAS_OFF) {
-			regmap_update_bits(map,
+			regmap_update_bits(nau8822->regmap,
 				NAU8822_REG_POWER_MANAGEMENT_1,
 				NAU8822_REFIMP_MASK, NAU8822_REFIMP_3K);
 			mdelay(100);
 		}
-		regmap_update_bits(map, NAU8822_REG_POWER_MANAGEMENT_1,
+		regmap_update_bits(nau8822->regmap,
+			NAU8822_REG_POWER_MANAGEMENT_1,
 			NAU8822_REFIMP_MASK, NAU8822_REFIMP_300K);
 		break;
+
 	case SND_SOC_BIAS_OFF:
-		regmap_write(map,
+		regmap_write(nau8822->regmap,
 			NAU8822_REG_POWER_MANAGEMENT_1, 0);
-		regmap_write(map,
+		regmap_write(nau8822->regmap,
 			NAU8822_REG_POWER_MANAGEMENT_2, 0);
-		regmap_write(map,
+		regmap_write(nau8822->regmap,
 			NAU8822_REG_POWER_MANAGEMENT_3, 0);
 		break;
 	}
@@ -1046,6 +1062,7 @@ static int nau8822_probe(struct snd_soc_codec *codec)
 {
 	struct nau8822 *nau8822 = snd_soc_codec_get_drvdata(codec);
 	int i;
+	struct device_node *of_node = codec->dev->of_node;
 
 	/*
 	 * Set the update bit in all registers, that have one. This way all
@@ -1055,6 +1072,14 @@ static int nau8822_probe(struct snd_soc_codec *codec)
 	for (i = 0; i < ARRAY_SIZE(update_reg); i++)
 		regmap_update_bits(nau8822->regmap,
 			update_reg[i], 0x100, 0x100);
+
+	/* Check property to configure the two loudspeaker outputs as
+	 * a single Bridge Tied Load output
+	 */
+	if (of_property_read_bool(of_node, "nuvoton,spk-btl"))
+		regmap_update_bits(nau8822->codec,
+					      NAU8822_REG_RIGHT_SPEAKER_CONTROL,
+					      NAU8822_RSUBBYP, NAU8822_RSUBBYP);
 
 	return 0;
 }
