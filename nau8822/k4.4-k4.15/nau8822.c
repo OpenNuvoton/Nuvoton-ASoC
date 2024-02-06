@@ -232,8 +232,8 @@ static int nau8822_eq_put(struct snd_kcontrol *kcontrol,
 		ret = snd_soc_component_write(component, reg + i, value);
 		if (ret) {
 			dev_err(component->dev,
-			    "EQ configuration fail, register: %x ret: %d\n",
-			    reg + i, ret);
+				"EQ configuration fail, register: %x ret: %d\n",
+				reg + i, ret);
 			kfree(data);
 			return ret;
 		}
@@ -726,6 +726,17 @@ static int nau8822_set_pll(struct snd_soc_dai *dai, int pll_id, int source,
 	struct nau8822_pll *pll_param = &nau8822->pll;
 	int ret, fs;
 
+	if (freq_in == pll_param->freq_in &&
+	    freq_out == pll_param->freq_out)
+		return 0;
+
+	if (freq_out == 0) {
+		dev_dbg(component->dev, "PLL disabled\n");
+		snd_soc_component_update_bits(component,
+			NAU8822_REG_POWER_MANAGEMENT_1, NAU8822_PLL_EN_MASK, NAU8822_PLL_OFF);
+		return 0;
+	}
+
 	fs = freq_out / 256;
 
 	ret = nau8822_calc_pll(freq_in, fs, pll_param);
@@ -740,6 +751,8 @@ static int nau8822_set_pll(struct snd_soc_dai *dai, int pll_id, int source,
 		pll_param->pll_int, pll_param->pll_frac,
 		pll_param->mclk_scaler, pll_param->pre_factor);
 
+	snd_soc_component_update_bits(component,
+		NAU8822_REG_POWER_MANAGEMENT_1, NAU8822_PLL_EN_MASK, NAU8822_PLL_OFF);
 	snd_soc_component_update_bits(component,
 		NAU8822_REG_PLL_N, NAU8822_PLLMCLK_DIV2 | NAU8822_PLLN_MASK,
 		(pll_param->pre_factor ? NAU8822_PLLMCLK_DIV2 : 0) |
@@ -757,6 +770,11 @@ static int nau8822_set_pll(struct snd_soc_dai *dai, int pll_id, int source,
 		pll_param->mclk_scaler << NAU8822_MCLKSEL_SFT);
 	snd_soc_component_update_bits(component,
 		NAU8822_REG_CLOCKING, NAU8822_CLKM_MASK, NAU8822_CLKM_PLL);
+	snd_soc_component_update_bits(component,
+		NAU8822_REG_POWER_MANAGEMENT_1, NAU8822_PLL_EN_MASK, NAU8822_PLL_ON);
+
+	pll_param->freq_in = freq_in;
+	pll_param->freq_out = freq_out;
 
 	return 0;
 }
@@ -831,7 +849,7 @@ static int nau8822_hw_params(struct snd_pcm_substream *substream,
 	unsigned int ctrl_val, bclk_fs, bclk_div;
 
 	/* make BCLK and LRC divide configuration if the codec as master. */
-	ctrl_val = snd_soc_read(codec, NAU8822_REG_CLOCKING);
+	regmap_read(nau8822->regmap, NAU8822_REG_CLOCKING, &ctrl_val);
 	if (ctrl_val & NAU8822_CLK_MASTER) {
 		/* get the bclk and fs ratio */
 		bclk_fs = snd_soc_params_to_bclk(params) / params_rate(params);
@@ -843,7 +861,7 @@ static int nau8822_hw_params(struct snd_pcm_substream *substream,
 			bclk_div = NAU8822_BCLKDIV_2;
 		else
 			return -EINVAL;
-		snd_soc_update_bits(codec, NAU8822_REG_CLOCKING,
+		regmap_update_bits(nau8822->regmap, NAU8822_REG_CLOCKING,
 				NAU8822_BCLKSEL_MASK, bclk_div);
 	}
 
@@ -886,9 +904,9 @@ static int nau8822_hw_params(struct snd_pcm_substream *substream,
 		return -EINVAL;
 	}
 
-	snd_soc_update_bits(codec,
+	regmap_update_bits(nau8822->regmap,
 		NAU8822_REG_AUDIO_INTERFACE, NAU8822_WLEN_MASK, val_len);
-	snd_soc_update_bits(codec,
+	regmap_update_bits(nau8822->regmap,
 		NAU8822_REG_ADDITIONAL_CONTROL, NAU8822_SMPLR_MASK, val_rate);
 
 	/* If the master clock is from MCLK, provide the runtime FS for driver
@@ -903,14 +921,15 @@ static int nau8822_hw_params(struct snd_pcm_substream *substream,
 static int nau8822_mute(struct snd_soc_dai *dai, int mute, int direction)
 {
 	struct snd_soc_codec *codec = dai->codec;
+	struct nau8822 *nau8822 = snd_soc_codec_get_drvdata(codec);
 
 	dev_dbg(codec->dev, "%s: %d\n", __func__, mute);
 
 	if (mute)
-		snd_soc_update_bits(codec,
+		regmap_update_bits(nau8822->regmap,
 			NAU8822_REG_DAC_CONTROL, 0x40, 0x40);
 	else
-		snd_soc_update_bits(codec,
+		regmap_update_bits(nau8822->regmap,
 			NAU8822_REG_DAC_CONTROL, 0x40, 0);
 
 	return 0;
@@ -919,43 +938,45 @@ static int nau8822_mute(struct snd_soc_dai *dai, int mute, int direction)
 static int nau8822_set_bias_level(struct snd_soc_codec *codec,
 				 enum snd_soc_bias_level level)
 {
+	struct nau8822 *nau8822 = snd_soc_codec_get_drvdata(codec);
+
 	switch (level) {
 	case SND_SOC_BIAS_ON:
 	case SND_SOC_BIAS_PREPARE:
-		snd_soc_update_bits(codec,
+		regmap_update_bits(nau8822->regmap,
 			NAU8822_REG_POWER_MANAGEMENT_1,
 			NAU8822_REFIMP_MASK, NAU8822_REFIMP_80K);
 		break;
 
 	case SND_SOC_BIAS_STANDBY:
-		snd_soc_update_bits(codec,
+		regmap_update_bits(nau8822->regmap,
 			NAU8822_REG_POWER_MANAGEMENT_1,
 			NAU8822_IOBUF_EN | NAU8822_ABIAS_EN,
 			NAU8822_IOBUF_EN | NAU8822_ABIAS_EN);
 
 		if (snd_soc_codec_get_bias_level(codec) ==
 			SND_SOC_BIAS_OFF) {
-			snd_soc_update_bits(codec,
+			regmap_update_bits(nau8822->regmap,
 				NAU8822_REG_POWER_MANAGEMENT_1,
 				NAU8822_REFIMP_MASK, NAU8822_REFIMP_3K);
 			mdelay(100);
 		}
-		snd_soc_update_bits(codec,
+		regmap_update_bits(nau8822->regmap,
 			NAU8822_REG_POWER_MANAGEMENT_1,
 			NAU8822_REFIMP_MASK, NAU8822_REFIMP_300K);
 		break;
 
 	case SND_SOC_BIAS_OFF:
-		snd_soc_write(codec,
+		regmap_write(nau8822->regmap,
 			NAU8822_REG_POWER_MANAGEMENT_1, 0);
-		snd_soc_write(codec,
+		regmap_write(nau8822->regmap,
 			NAU8822_REG_POWER_MANAGEMENT_2, 0);
-		snd_soc_write(codec,
+		regmap_write(nau8822->regmap,
 			NAU8822_REG_POWER_MANAGEMENT_3, 0);
 		break;
 	}
 
-	dev_dbg(codec->dev, "%s: %d\n", __func__, level);
+	dev_dbg(nau8822->dev, "%s: %d\n", __func__, level);
 
 	return 0;
 }
@@ -1036,7 +1057,9 @@ static const int update_reg[] = {
 
 static int nau8822_probe(struct snd_soc_codec *codec)
 {
+	struct nau8822 *nau8822 = snd_soc_codec_get_drvdata(codec);
 	int i;
+	struct device_node *of_node = codec->dev->of_node;
 
 	/*
 	 * Set the update bit in all registers, that have one. This way all
@@ -1044,7 +1067,16 @@ static int nau8822_probe(struct snd_soc_codec *codec)
 	 * written.
 	 */
 	for (i = 0; i < ARRAY_SIZE(update_reg); i++)
-		snd_soc_update_bits(codec, update_reg[i], 0x100, 0x100);
+		regmap_update_bits(nau8822->regmap,
+			update_reg[i], 0x100, 0x100);
+
+	/* Check property to configure the two loudspeaker outputs as
+	 * a single Bridge Tied Load output
+	 */
+	if (of_property_read_bool(of_node, "nuvoton,spk-btl"))
+		regmap_update_bits(nau8822->codec,
+					      NAU8822_REG_RIGHT_SPEAKER_CONTROL,
+					      NAU8822_RSUBBYP, NAU8822_RSUBBYP);
 
 	return 0;
 }
@@ -1110,7 +1142,7 @@ static int nau8822_i2c_probe(struct i2c_client *i2c,
 		return ret;
 	}
 
-	ret = snd_soc_register_codec(dev,&soc_codec_dev_nau8822, &nau8822_dai, 1);
+	ret = snd_soc_register_codec(dev, &soc_codec_dev_nau8822, &nau8822_dai, 1);
 	if (ret != 0) {
 		dev_err(&i2c->dev, "Failed to register CODEC: %d\n", ret);
 		return ret;
