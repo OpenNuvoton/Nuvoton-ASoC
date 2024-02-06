@@ -730,6 +730,17 @@ static int nau8822_set_pll(struct snd_soc_dai *dai, int pll_id, int source,
 	struct nau8822_pll *pll_param = &nau8822->pll;
 	int ret, fs;
 
+	if (freq_in == pll_param->freq_in &&
+	    freq_out == pll_param->freq_out)
+		return 0;
+
+	if (freq_out == 0) {
+		dev_dbg(component->dev, "PLL disabled\n");
+		snd_soc_component_update_bits(component,
+			NAU8822_REG_POWER_MANAGEMENT_1, NAU8822_PLL_EN_MASK, NAU8822_PLL_OFF);
+		return 0;
+	}
+
 	fs = freq_out / 256;
 
 	ret = nau8822_calc_pll(freq_in, fs, pll_param);
@@ -744,6 +755,8 @@ static int nau8822_set_pll(struct snd_soc_dai *dai, int pll_id, int source,
 		pll_param->pll_int, pll_param->pll_frac,
 		pll_param->mclk_scaler, pll_param->pre_factor);
 
+	regmap_update_bits(nau8822->regmap,
+		NAU8822_REG_POWER_MANAGEMENT_1, NAU8822_PLL_EN_MASK, NAU8822_PLL_OFF);
 	regmap_update_bits(nau8822->regmap,
 		NAU8822_REG_PLL_N, NAU8822_PLLMCLK_DIV2 | NAU8822_PLLN_MASK,
 		(pll_param->pre_factor ? NAU8822_PLLMCLK_DIV2 : 0) |
@@ -763,6 +776,9 @@ static int nau8822_set_pll(struct snd_soc_dai *dai, int pll_id, int source,
 		NAU8822_REG_CLOCKING, NAU8822_CLKM_MASK, NAU8822_CLKM_PLL);
 	regmap_update_bits(nau8822->regmap,
 		NAU8822_REG_POWER_MANAGEMENT_1, NAU8822_PLL_EN_MASK, NAU8822_PLL_ON);
+
+	pll_param->freq_in = freq_in;
+	pll_param->freq_out = freq_out;
 
 	return 0;
 }
@@ -1048,6 +1064,7 @@ static int nau8822_probe(struct snd_soc_codec *codec)
 {
 	struct nau8822 *nau8822 = snd_soc_codec_get_drvdata(codec);
 	int i;
+	struct device_node *of_node = codec->dev->of_node;
 
 	/*
 	 * Set the update bit in all registers, that have one. This way all
@@ -1057,6 +1074,14 @@ static int nau8822_probe(struct snd_soc_codec *codec)
 	for (i = 0; i < ARRAY_SIZE(update_reg); i++)
 		regmap_update_bits(nau8822->regmap,
 			update_reg[i], 0x100, 0x100);
+
+	/* Check property to configure the two loudspeaker outputs as
+	 * a single Bridge Tied Load output
+	 */
+	if (of_property_read_bool(of_node, "nuvoton,spk-btl"))
+		regmap_update_bits(nau8822->regmap,
+				   NAU8822_REG_RIGHT_SPEAKER_CONTROL,
+				   NAU8822_RSUBBYP, NAU8822_RSUBBYP);
 
 	return 0;
 }
