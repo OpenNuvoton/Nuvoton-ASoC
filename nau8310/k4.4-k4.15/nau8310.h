@@ -582,7 +582,7 @@ struct nau8310 {
 	int boost_delay;
 	int boost_convert_enable;
 	int boost_target_limit;
-	int boost_margin;
+	int boost_target_margin;
 	int normal_iis_data;
 	int alc_enable;
 	int aec_enable;
