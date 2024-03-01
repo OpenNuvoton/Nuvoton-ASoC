@@ -120,6 +120,7 @@ static int nau8310_dsp_idle(struct snd_soc_codec *codec)
 			dev_dbg(codec->dev, "Idle pattern found\n");
 			break;
 		}
+		nau8310_sw_reset_chip(nau8310->regmap);
 	}
 	/* The driver can't establish a connection to DSP.
 	 * Maybe it is not clocked, or previous synchronization issue.
@@ -188,9 +189,12 @@ static int nau8310_massage_to_dsp(struct snd_soc_codec *codec,
 			if (data_size == NAU8310_DSP_DATA_BYTE) {
 				regmap_write(nau8310->regmap,
 					     NAU8310_RF000_DSP_COMM, *value);
+				dev_dbg(codec->dev, "[W] %02x %02x %02x %02x\n",
+					data[0], data[1], data[2], data[3]);
 				data_size = 0;
 				*value = 0;
 				frag_cnt++;
+
 
 				dev_dbg(codec->dev, "[W] %02x %02x %02x %02x\n",
 					data[0], data[1], data[2], data[3]);
@@ -201,14 +205,14 @@ static int nau8310_massage_to_dsp(struct snd_soc_codec *codec,
 			padding = NAU8310_DSP_DATA_BYTE - data_size;
 			regmap_write(nau8310->regmap,
 				     NAU8310_RF000_DSP_COMM, *value);
+			dev_dbg(codec->dev, "[W] %02x %02x %02x %02x\n",
+				data[0], data[1], data[2], data[3]);
 			*value = 0;
 			frag_cnt++;
 
-			dev_dbg(codec->dev, "[W] %02x %02x %02x %02x\n",
-				data[0], data[1], data[2], data[3]);
 		}
 		dev_dbg(codec->dev, "\n");
-	}
+
 
 	/* sending trailing fragment */
 	frag_cnt++;
@@ -285,6 +289,15 @@ static int nau8310_reply_from_dsp(struct snd_soc_codec *codec,
 	unsigned int payload, *data_buf;
 	int i, j, ret, frag_len, frag_payload_len;
 	int data_count, len_pos, pad_len, pad_len_exp;
+
+	if (!cmd_info->reply_data) {
+		dev_dbg(nau8310->dev, "The cmd without replay data!!\n");
+		ret = nau8310_dsp_replied(component, &frag_len);
+		if (ret)
+			goto err;
+		else if (frag_len == 0)
+			goto done;
+	}
 
 	if (!data) {
 		ret = -EINVAL;
