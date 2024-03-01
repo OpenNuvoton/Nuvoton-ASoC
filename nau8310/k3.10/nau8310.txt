@@ -59,7 +59,7 @@ Optional properties:
 
   - nuvoton,boost-target-limit: Boost control target value limit. Number from 0x0 to 0x3f and 0.19 V per step.
 
-  - nuvoton,boost-margin: Boost margin value between boost target voltage and peak output level.
+  - nuvoton,boost-target-margin: Boost margin value between boost target voltage and peak output level.
         Number from 0x0 to 0x3f and 0.19 V per step.
 
   - nuvoton,normal-iis-data: I2S data mode.
@@ -70,7 +70,7 @@ Optional properties:
 
   - nuvoton,aec-enable: Enable acoustic echo cancellation (AEC) function.
 
-  - nuvoton,clock-detection-disable: Disable clock detection circuit that can controls the audio paths on and off.
+  - nuvoton,clock-det-disable: Disable clock detection circuit that can controls the audio paths on and off.
         If set then clock detection disabled, otherwise clock detection circuit enables.
 
   - nuvoton,clock-det-data: Request clock detection to require 2048 non-zero samples before enabling the audio paths.
@@ -89,8 +89,8 @@ Example:
       nuvoton,temp-compensation;
       nuvoton,boost-delay = <0x8>;
       nuvoton,boost-convert-enable = <1>;
-      nuvoton,boost-target-limit = <0x3a>;
-      nuvoton,boost-margin = <0x2>;
+      nuvoton,boost-target-limit = <0x32>;
+      nuvoton,boost-target-margin = <0x2>;
       nuvoton,normal-iis-data;
       nuvoton,clock-det-data;
   };
