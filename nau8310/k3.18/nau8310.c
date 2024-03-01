@@ -1825,7 +1825,7 @@ static int nau8310_read_device_properties(struct device *dev,
 	if (ret)
 		nau8310->sar_sampling_time = 1;
 	nau8310->clock_detection =
-		!of_property_read_bool(dev->of_node, "nuvoton,clock-detection-disable");
+		!of_property_read_bool(dev->of_node, "nuvoton,clock-det-disable");
 	nau8310->clock_det_data =
 		of_property_read_bool(dev->of_node, "nuvoton,clock-det-data");
 	nau8310->temp_compensation =

@@ -292,7 +292,7 @@ static int nau8310_reply_from_dsp(struct snd_soc_codec *codec,
 
 	if (!cmd_info->reply_data) {
 		dev_dbg(nau8310->dev, "The cmd without replay data!!\n");
-		ret = nau8310_dsp_replied(component, &frag_len);
+		ret = nau8310_dsp_replied(codec, &frag_len);
 		if (ret)
 			goto err;
 		else if (frag_len == 0)

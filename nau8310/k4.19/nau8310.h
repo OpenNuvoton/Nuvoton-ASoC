@@ -616,6 +616,6 @@ struct nau8310_osr_attr {
 	unsigned int clk_src;
 };
 
-int nau8310_enable_dsp(struct snd_soc_codec *codec);
+int nau8310_enable_dsp(struct snd_soc_component *component);
 
 #endif /* __NAU8310_H__ */

@@ -98,7 +98,7 @@ struct nau8310_kcs_setup {
 	void *get_data;
 };
 
-int nau8310_dsp_init(struct snd_soc_codec *codec);
-int nau8310_dsp_resume(struct snd_soc_codec *codec);
+int nau8310_dsp_init(struct snd_soc_component *component);
+int nau8310_dsp_resume(struct snd_soc_component *component);
 
 #endif /* __NAU8310_DSP_H__ */
