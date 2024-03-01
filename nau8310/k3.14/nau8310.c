@@ -669,6 +669,8 @@ static int nau8310_srate_clk_apply(struct nau8310 *nau8310,
 		mult_sel = (mclk_mult_sel > dsp_mult_sel ? mclk_mult_sel : dsp_mult_sel);
 	} else {
 		mult_sel = dsp_mult_sel;
+		regmap_update_bits(nau8310->regmap, NAU8310_R04_ENA_CTRL,
+						   NAU8310_MCLK_SEL_MASK, 0);
 	}
 	switch (mult_sel) {
 	case 4:	/* multiplier 16x, i.e. 2^4 */
@@ -1298,7 +1300,7 @@ int nau8310_enable_dsp(struct snd_soc_codec *codec)
 			   NAU8310_DSP_OSC_EN | NAU8310_DSP_SEL_OSC);
 	nau8310_software_reset(nau8310->regmap);
 	/* wait for the power ready */
-	msleep(60);
+	msleep(120);
 	regmap_update_bits(nau8310->regmap, NAU8310_R1A_DSP_CORE_CTRL2,
 			   NAU8310_DSP_RUNSTALL | NAU8310_DAC_SEL_DSP_OUT,
 			   NAU8310_DAC_SEL_DSP_OUT);
@@ -1361,7 +1363,7 @@ static int __maybe_unused nau8310_resume(struct snd_soc_codec *codec)
 				   NAU8310_DSP_OSC_EN | NAU8310_DSP_SEL_OSC);
 		nau8310_software_reset(nau8310->regmap);
 		/* wait for the power ready */
-		msleep(60);
+		msleep(120);
 		regmap_update_bits(nau8310->regmap, NAU8310_R1A_DSP_CORE_CTRL2,
 				   NAU8310_DSP_RUNSTALL, 0);
 		ret = nau8310_dsp_resume(codec);
@@ -1600,7 +1602,7 @@ static void nau8310_init_regs(struct nau8310 *nau8310)
 	regmap_update_bits(regmap, NAU8310_R17_BOOST_CTRL1,
 			   NAU8310_BSTLIMIT_MASK | NAU8310_BSTMARGIN_MASK,
 			   (nau8310->boost_target_limit << NAU8310_BSTLIMIT_SFT) |
-			   nau8310->boost_margin);
+			   nau8310->boost_target_margin);
 	/* Temperature compensation */
 	regmap_update_bits(regmap, NAU8310_R30_TEMP_COMP_CTRL,
 			   NAU8310_TEMP_COMP_ACT2_MASK, 0);
@@ -1707,13 +1709,13 @@ static void nau8310_print_device_properties(struct nau8310 *nau8310)
 	dev_dbg(dev, "sar-voltage:             %d\n", nau8310->sar_voltage);
 	dev_dbg(dev, "sar-compare-time:        %d\n", nau8310->sar_compare_time);
 	dev_dbg(dev, "sar-sampling-time:       %d\n", nau8310->sar_sampling_time);
-	dev_dbg(dev, "clock-detection-disable: %d\n", nau8310->clock_detection);
+	dev_dbg(dev, "clock-det-disable:       %d\n", nau8310->clock_detection);
 	dev_dbg(dev, "clock-det-data:          %d\n", nau8310->clock_det_data);
 	dev_dbg(dev, "temp-compensation:       %d\n", nau8310->temp_compensation);
 	dev_dbg(dev, "boost-delay:             %d\n", nau8310->boost_delay);
 	dev_dbg(dev, "boost-convert-enable:    %d\n", nau8310->boost_convert_enable);
 	dev_dbg(dev, "boost-target-limit:      %x\n", nau8310->boost_target_limit);
-	dev_dbg(dev, "boost-margin:            %x\n", nau8310->boost_margin);
+	dev_dbg(dev, "boost-target-margin:     %x\n", nau8310->boost_target_margin);
 	dev_dbg(dev, "normal-iis-data:         %d\n", nau8310->normal_iis_data);
 	dev_dbg(dev, "alc-enable:              %d\n", nau8310->alc_enable);
 	dev_dbg(dev, "aec-enable:              %d\n", nau8310->aec_enable);
@@ -1754,19 +1756,19 @@ static int nau8310_read_device_properties(struct device *dev,
 		ret = of_property_read_u32(dev->of_node, "nuvoton,boost-delay",
 					       &nau8310->boost_delay);
 		if (ret)
-			nau8310->boost_delay = 0;
+			nau8310->boost_delay = 0x8;
 		ret = of_property_read_u32(dev->of_node, "nuvoton,boost-convert-enable",
 					       &nau8310->boost_convert_enable);
 		if (ret)
-			nau8310->boost_convert_enable = 0;
+			nau8310->boost_convert_enable = 0x0;
 		ret = of_property_read_u32(dev->of_node, "nuvoton,boost-target-limit",
 					       &nau8310->boost_target_limit);
 		if (ret)
-			nau8310->boost_target_limit = 0;
-		ret = of_property_read_u32(dev->of_node, "nuvoton,boost-margin",
-					       &nau8310->boost_margin);
+			nau8310->boost_target_limit = 0x32;
+		ret = of_property_read_u32(dev->of_node, "nuvoton,boost-target-margin",
+					       &nau8310->boost_target_margin);
 		if (ret)
-			nau8310->boost_margin = 0;
+			nau8310->boost_target_margin = 0x2;
 	}
 	nau8310->normal_iis_data =
 		of_property_read_bool(dev->of_node, "nuvoton,normal-iis-data");
@@ -1789,9 +1791,6 @@ static int nau8310_i2c_probe(struct i2c_client *i2c,
 		nau8310 = devm_kzalloc(dev, sizeof(*nau8310), GFP_KERNEL);
 		if (!nau8310)
 			return -ENOMEM;
-		ret = nau8310_read_device_properties(dev, nau8310);
-		if (ret)
-			return ret;
 	}
 	i2c_set_clientdata(i2c, nau8310);
 
@@ -1802,7 +1801,8 @@ static int nau8310_i2c_probe(struct i2c_client *i2c,
 
 	nau8310->dev = dev;
 	nau8310->dsp_enable = false;
-	nau8310_print_device_properties(nau8310);
+
+	nau8310_reset_chip(nau8310->regmap);
 	ret = regmap_read(nau8310->regmap, NAU8310_R46_I2C_DEVICE_ID, &value);
 	if (ret) {
 		dev_err(dev, "Failed to read device id from the NAU8310: %d\n",
@@ -1810,7 +1810,10 @@ static int nau8310_i2c_probe(struct i2c_client *i2c,
 		return ret;
 	}
 	nau8310->silicon_id = value & NAU8310_REG_SI_REV_MASK;
-	nau8310_reset_chip(nau8310->regmap);
+	ret = nau8310_read_device_properties(dev, nau8310);
+	if (ret)
+		return ret;
+	nau8310_print_device_properties(nau8310);
 	nau8310_init_regs(nau8310);
 
 	return snd_soc_register_codec(dev, &soc_codec_dev_nau8310,
