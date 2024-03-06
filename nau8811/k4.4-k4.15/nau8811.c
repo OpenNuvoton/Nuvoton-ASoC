@@ -919,6 +919,7 @@ static int nau8811_digital_mute(struct snd_soc_dai *dai, int mute, int direction
 }
 
 static const struct snd_soc_dai_ops nau8811_dai_ops = {
+	.startup = nau8811_dai_startup,
 	.hw_params = nau8811_hw_params,
 	.set_fmt = nau8811_set_dai_fmt,
 	.mute_stream = nau8811_digital_mute,
