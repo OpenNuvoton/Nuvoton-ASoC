@@ -2478,7 +2478,7 @@ static int nau8825_set_pll(struct snd_soc_codec *codec, int pll_id, int source,
 	nau8825_fll_apply(nau8825, &fll_param);
 	mdelay(2);
 	regmap_update_bits(nau8825->regmap, NAU8825_REG_CLK_DIVIDER,
-			NAU8825_CLK_SRC_MASK, NAU8825_CLK_SRC_VCO);11
+			NAU8825_CLK_SRC_MASK, NAU8825_CLK_SRC_VCO);
 	return 0;
 }
 
