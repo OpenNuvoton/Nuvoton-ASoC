@@ -1074,7 +1074,7 @@ static int nau8822_probe(struct snd_soc_codec *codec)
 	 * a single Bridge Tied Load output
 	 */
 	if (of_property_read_bool(of_node, "nuvoton,spk-btl"))
-		regmap_update_bits(nau8822->codec,
+		regmap_update_bits(nau8822->regmap,
 					      NAU8822_REG_RIGHT_SPEAKER_CONTROL,
 					      NAU8822_RSUBBYP, NAU8822_RSUBBYP);
 
