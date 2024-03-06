@@ -1870,16 +1870,6 @@ static int nau8824_read_device_properties(struct device *dev,
 /* Please keep this list alphabetically sorted */
 static const struct dmi_system_id nau8824_quirk_table[] = {
 	{
-		/* Cyberbook T116 rugged tablet */
-		.matches = {
-			DMI_EXACT_MATCH(DMI_BOARD_VENDOR, "Default string"),
-			DMI_EXACT_MATCH(DMI_BOARD_NAME, "Cherry Trail CR"),
-			DMI_EXACT_MATCH(DMI_PRODUCT_SKU, "20170531"),
-		},
-		.driver_data = (void *)(NAU8824_JD_ACTIVE_HIGH |
-					NAU8824_MONO_SPEAKER),
-	},
-	{
 		/* CUBE iwork8 Air */
 		.matches = {
 			DMI_MATCH(DMI_SYS_VENDOR, "cube"),
