@@ -205,7 +205,7 @@ static struct reg_default nau8825_xtalk_baktab[] = {
 };
 
 /* The regmap patch for Rev C */
-static const struct reg_sequence nau8825_regmap_patch[] = {
+static const struct reg_default nau8825_regmap_patch[] = {
 	{ NAU8825_REG_FLL2, 0x0000 },
 	{ NAU8825_REG_FLL4, 0x8010 },
 	{ NAU8825_REG_FLL_VCO_RSV, 0x0bc0 },
