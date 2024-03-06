@@ -230,15 +230,15 @@ static const struct snd_kcontrol_new nau8822_snd_controls[] = {
 	SOC_ENUM("EQ1 Cut Off", nau8822_eq1),
 	SOC_SINGLE_TLV("EQ1 Volume", NAU8822_REG_EQ1,  0, 24, 1, eq_tlv),
 
-	SOC_ENUM("Equaliser EQ2 Bandwidth", nau8822_eq2bw),
+	SOC_ENUM("Equaliser EQ2 Bandwidth", eq2bw),
 	SOC_ENUM("EQ2 Cut Off", nau8822_eq2),
 	SOC_SINGLE_TLV("EQ2 Volume", NAU8822_REG_EQ2,  0, 24, 1, eq_tlv),
 
-	SOC_ENUM("Equaliser EQ3 Bandwidth", nau8822_eq3bw),
+	SOC_ENUM("Equaliser EQ3 Bandwidth", eq3bw),
 	SOC_ENUM("EQ3 Cut Off", nau8822_eq3),
 	SOC_SINGLE_TLV("EQ3 Volume", NAU8822_REG_EQ3,  0, 24, 1, eq_tlv),
 
-	SOC_ENUM("Equaliser EQ4 Bandwidth", nau8822_eq4bw),
+	SOC_ENUM("Equaliser EQ4 Bandwidth", eq4bw),
 	SOC_ENUM("EQ4 Cut Off", nau8822_eq4),
 	SOC_SINGLE_TLV("EQ4 Volume", NAU8822_REG_EQ4,  0, 24, 1, eq_tlv),
 
