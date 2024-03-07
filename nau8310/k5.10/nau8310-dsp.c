@@ -1,15 +1,10 @@
-/*
- * The NAU83G10/20 DSP driver.
- *
- * Copyright 2021 Nuvoton Technology Corp.
- *
- * Author: John Hsu <kchsu0@nuvoton.com>
- *         David Lin <ctlin0@nuvoton.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
- */
+// SPDX-License-Identifier: GPL-2.0-only
+//
+// The NAU83G10/20 DSP driver.
+//
+// Copyright 2021 Nuvoton Technology Crop.
+// Author: John Hsu <KCHSU0@nuvoton.com>
+//         David Lin <ctlin0@nuvoton.com>
 
 #include <linux/delay.h>
 #include <linux/firmware.h>
@@ -29,7 +24,7 @@
 
 #define NAU8310_DSP_IDLE_RETRY 10
 
-static int nau8310_dsp_set_kcs_setup(struct snd_soc_codec *codec, bool nowait);
+static int nau8310_dsp_set_kcs_setup(struct snd_soc_component *component, bool nowait);
 
 static const struct nau8310_cmd_info nau8310_dsp_cmd_table[] = {
 	[NAU8310_DSP_CMD_GET_COUNTER] = {
@@ -102,9 +97,9 @@ static void nau8310_sw_reset_chip(struct regmap *regmap)
 }
 
 /* checking for DSP IDLE pattern */
-static int nau8310_dsp_idle(struct snd_soc_codec *codec)
+static int nau8310_dsp_idle(struct snd_soc_component *component)
 {
-	struct nau8310 *nau8310 = snd_soc_codec_get_drvdata(codec);
+	struct nau8310 *nau8310 = snd_soc_component_get_drvdata(component);
 	u8 buf[4];
 	unsigned int idle_pattern;
 	int ret, retries;
@@ -113,11 +108,11 @@ static int nau8310_dsp_idle(struct snd_soc_codec *codec)
 		ret = regmap_read(nau8310->regmap, NAU8310_RF000_DSP_COMM,
 				  &idle_pattern);
 		if (ret) {
-			dev_err(codec->dev, "Failed to read dsp status\n");
+			dev_err(component->dev, "Failed to read dsp status\n");
 			return ret;
 		}
 		if (idle_pattern == NAU8310_DSP_COMM_IDLE_WORD) {
-			dev_dbg(codec->dev, "Idle pattern found\n");
+			dev_dbg(component->dev, "Idle pattern found\n");
 			break;
 		}
 		nau8310_sw_reset_chip(nau8310->regmap);
@@ -126,29 +121,29 @@ static int nau8310_dsp_idle(struct snd_soc_codec *codec)
 	 * Maybe it is not clocked, or previous synchronization issue.
 	 */
 	if (retries == 0) {
-		dev_err(codec->dev, "Timeout for idle pattern\n");
+		dev_err(component->dev, "Timeout for idle pattern\n");
 		return -EIO;
 	}
 
 	*(unsigned int *)&buf[0] = idle_pattern;
 
-	dev_dbg(codec->dev, "[R] %02x %02x %02x %02x\n",
+	dev_dbg(component->dev, "[R] %02x %02x %02x %02x\n",
 		buf[0], buf[1], buf[2], buf[3]);
 
 	return 0;
 }
 
-static int nau8310_massage_to_dsp(struct snd_soc_codec *codec,
+static int nau8310_massage_to_dsp(struct snd_soc_component *component,
 				  const struct nau8310_cmd_info *cmd_info, int frag_len,
 				  int param_offset, int param_size, void *param_data)
 {
-	struct nau8310 *nau8310 = snd_soc_codec_get_drvdata(codec);
+	struct nau8310 *nau8310 = snd_soc_component_get_drvdata(component);
 	u8 data[4], *b_data;
 	unsigned int *value = (unsigned int *)data;
 	unsigned int preamble = NAU8310_DSP_COMM_PREAMBLE;
 	int ret, i, data_size, padding = 0, frag_cnt = 0;
 
-	ret = nau8310_dsp_idle(codec);
+	ret = nau8310_dsp_idle(component);
 	if (ret)
 		goto err;
 
@@ -159,9 +154,9 @@ static int nau8310_massage_to_dsp(struct snd_soc_codec *codec,
 	data[3] = frag_len >> 2;
 	regmap_write(nau8310->regmap, NAU8310_RF000_DSP_COMM, *value);
 
-	dev_dbg(codec->dev, "Sending preamble fragment (CMD_ID 0x%x, LEN 0x%x)\n",
+	dev_dbg(component->dev, "Sending preamble fragment (CMD_ID 0x%x, LEN 0x%x)\n",
 		cmd_info->cmd_id, frag_len);
-	dev_dbg(codec->dev, "[W] %02x %02x %02x %02x\n",
+	dev_dbg(component->dev, "[W] %02x %02x %02x %02x\n",
 		data[0], data[1], data[2], data[3]);
 
 	if (!cmd_info->msg_param)
@@ -176,9 +171,9 @@ static int nau8310_massage_to_dsp(struct snd_soc_codec *codec,
 	regmap_write(nau8310->regmap, NAU8310_RF000_DSP_COMM, *value);
 	frag_cnt++;
 
-	dev_dbg(codec->dev, "Sending parameters fragment (offset 0x%x, size 0x%x)\n",
+	dev_dbg(component->dev, "Sending parameters fragment (offset 0x%x, size 0x%x)\n",
 		param_offset, param_size);
-	dev_dbg(codec->dev, "[W] %02x %02x %02x %02x\n",
+	dev_dbg(component->dev, "[W] %02x %02x %02x %02x\n",
 		data[0], data[1], data[2], data[3]);
 
 	if (cmd_info->setup_data) {
@@ -189,7 +184,7 @@ static int nau8310_massage_to_dsp(struct snd_soc_codec *codec,
 			if (data_size == NAU8310_DSP_DATA_BYTE) {
 				regmap_write(nau8310->regmap,
 					     NAU8310_RF000_DSP_COMM, *value);
-				dev_dbg(codec->dev, "[W] %02x %02x %02x %02x\n",
+				dev_dbg(component->dev, "[W] %02x %02x %02x %02x\n",
 					data[0], data[1], data[2], data[3]);
 				data_size = 0;
 				*value = 0;
@@ -203,13 +198,13 @@ static int nau8310_massage_to_dsp(struct snd_soc_codec *codec,
 			padding = NAU8310_DSP_DATA_BYTE - data_size;
 			regmap_write(nau8310->regmap,
 				     NAU8310_RF000_DSP_COMM, *value);
-			dev_dbg(codec->dev, "[W] %02x %02x %02x %02x\n",
+			dev_dbg(component->dev, "[W] %02x %02x %02x %02x\n",
 				data[0], data[1], data[2], data[3]);
 			*value = 0;
 			frag_cnt++;
 
 		}
-		dev_dbg(codec->dev, "\n");
+		dev_dbg(component->dev, "\n");
 	}
 
 	/* sending trailing fragment */
@@ -219,13 +214,13 @@ static int nau8310_massage_to_dsp(struct snd_soc_codec *codec,
 	data[1] = ((frag_cnt >> 8) << 6) | (padding << 4);
 	regmap_write(nau8310->regmap, NAU8310_RF000_DSP_COMM, *value);
 
-	dev_dbg(codec->dev,	"Sending trailing fragment (LEN 0x%x, PAD 0x%x)\n",
+	dev_dbg(component->dev,	"Sending trailing fragment (LEN 0x%x, PAD 0x%x)\n",
 		frag_cnt, padding);
-	dev_dbg(codec->dev, "[W] %02x %02x %02x %02x\n",
+	dev_dbg(component->dev, "[W] %02x %02x %02x %02x\n",
 		data[0], data[1], data[2], data[3]);
 
 	if (frag_cnt != frag_len) {
-		dev_err(codec->dev,	"Sending massage error (CMD_ID 0x%x, LEN 0x%x) !!!\n",
+		dev_err(component->dev,	"Sending massage error (CMD_ID 0x%x, LEN 0x%x) !!!\n",
 			cmd_info->cmd_id, frag_cnt);
 		ret = -EPROTO;
 		goto err;
@@ -237,9 +232,9 @@ err:
 	return ret;
 }
 
-static int nau8310_dsp_replied(struct snd_soc_codec *codec, int *length)
+static int nau8310_dsp_replied(struct snd_soc_component *component, int *length)
 {
-	struct nau8310 *nau8310 = snd_soc_codec_get_drvdata(codec);
+	struct nau8310 *nau8310 = snd_soc_component_get_drvdata(component);
 	u8 buf[4];
 	const u8 *b = buf;
 	unsigned int reply_preamble;
@@ -249,7 +244,7 @@ static int nau8310_dsp_replied(struct snd_soc_codec *codec, int *length)
 		ret = regmap_read(nau8310->regmap, NAU8310_RF000_DSP_COMM,
 				  &reply_preamble);
 		if (ret) {
-			dev_err(codec->dev, "Failed to read reply preamble of dsp\n");
+			dev_err(component->dev, "Failed to read reply preamble of dsp\n");
 			return ret;
 		}
 		/* check for preamble */
@@ -263,13 +258,13 @@ static int nau8310_dsp_replied(struct snd_soc_codec *codec, int *length)
 		}
 	}
 	if (retries == 0) {
-		dev_err(codec->dev, "Timeout for reply preamble\n");
+		dev_err(component->dev, "Timeout for reply preamble\n");
 		return -EIO;
 	}
 
-	dev_dbg(codec->dev,	"Receiving preamble fragment (REPLY_ID 0x%x, LEN 0x%x)\n",
+	dev_dbg(component->dev,	"Receiving preamble fragment (REPLY_ID 0x%x, LEN 0x%x)\n",
 		reply_id, *length);
-	dev_dbg(codec->dev, "[R] %02x %02x %02x %02x\n",
+	dev_dbg(component->dev, "[R] %02x %02x %02x %02x\n",
 		b[0], b[1], b[2], b[3]);
 
 	if (reply_id == NAU8310_DSP_REPLY_OK)
@@ -278,10 +273,10 @@ static int nau8310_dsp_replied(struct snd_soc_codec *codec, int *length)
 		return -reply_id;
 }
 
-static int nau8310_reply_from_dsp(struct snd_soc_codec *codec,
+static int nau8310_reply_from_dsp(struct snd_soc_component *component,
 	const struct nau8310_cmd_info *cmd_info, int data_size, void *data)
 {
-	struct nau8310 *nau8310 = snd_soc_codec_get_drvdata(codec);
+	struct nau8310 *nau8310 = snd_soc_component_get_drvdata(component);
 	u8 buf[4], *b_data;
 	const u8 *b = buf;
 	unsigned int payload, *data_buf;
@@ -290,7 +285,7 @@ static int nau8310_reply_from_dsp(struct snd_soc_codec *codec,
 
 	if (!cmd_info->reply_data) {
 		dev_dbg(nau8310->dev, "The cmd without replay data!!\n");
-		ret = nau8310_dsp_replied(codec, &frag_len);
+		ret = nau8310_dsp_replied(component, &frag_len);
 		if (ret)
 			goto err;
 		else if (frag_len == 0)
@@ -303,7 +298,7 @@ static int nau8310_reply_from_dsp(struct snd_soc_codec *codec,
 	}
 	data_buf = (unsigned int *)data;
 
-	ret = nau8310_dsp_replied(codec, &frag_len);
+	ret = nau8310_dsp_replied(component, &frag_len);
 	if (ret)
 		goto err;
 	else if (frag_len == 0)
@@ -315,7 +310,7 @@ static int nau8310_reply_from_dsp(struct snd_soc_codec *codec,
 	for (i = 0; i < frag_payload_len; i++) {
 		ret = regmap_read(nau8310->regmap, NAU8310_RF000_DSP_COMM, &payload);
 		if (ret) {
-			dev_err(codec->dev, "Failed to read payload of dsp\n");
+			dev_err(component->dev, "Failed to read payload of dsp\n");
 			goto err;
 		}
 		if (cmd_info->msg_param) {
@@ -324,7 +319,7 @@ static int nau8310_reply_from_dsp(struct snd_soc_codec *codec,
 				data_count -= NAU8310_DSP_DATA_BYTE;
 				*(unsigned int *)&buf[0] = payload;
 
-				dev_dbg(codec->dev, "[R] %02x %02x %02x %02x\n",
+				dev_dbg(component->dev, "[R] %02x %02x %02x %02x\n",
 					buf[0], buf[1], buf[2], buf[3]);
 			} else {
 				*(unsigned int *)&buf[0] = payload;
@@ -336,7 +331,7 @@ static int nau8310_reply_from_dsp(struct snd_soc_codec *codec,
 						break;
 				}
 
-				dev_dbg(codec->dev, "[R] %02x %02x %02x %02x\n",
+				dev_dbg(component->dev, "[R] %02x %02x %02x %02x\n",
 					buf[0], buf[1], buf[2], buf[3]);
 				break;
 			}
@@ -347,7 +342,7 @@ static int nau8310_reply_from_dsp(struct snd_soc_codec *codec,
 			*data_buf |= b[2] << 16;
 			*data_buf |= b[3] << 24;
 
-			dev_dbg(codec->dev, "[R] %02x %02x %02x %02x\n",
+			dev_dbg(component->dev, "[R] %02x %02x %02x %02x\n",
 				buf[0], buf[1], buf[2], buf[3]);
 		}
 	}
@@ -355,22 +350,22 @@ static int nau8310_reply_from_dsp(struct snd_soc_codec *codec,
 	/* check the reply length same as request */
 	if (data_count && (cmd_info->cmd_id == NAU8310_DSP_CMD_GET_KCS_RSLTS ||
 		cmd_info->cmd_id == NAU8310_DSP_CMD_GET_KCS_SETUP)) {
-		dev_warn(codec->dev, "payload_len = %d, expected %d\n",
+		dev_warn(component->dev, "payload_len = %d, expected %d\n",
 			 data_size - data_count, data_size);
 	}
 
-	dev_dbg(codec->dev, "Reading trailing fragment\n");
+	dev_dbg(component->dev, "Reading trailing fragment\n");
 
 	ret = regmap_read(nau8310->regmap, NAU8310_RF000_DSP_COMM, &payload);
 	if (ret) {
-		dev_err(codec->dev, "Failed to read trailing fragment of dsp\n");
+		dev_err(component->dev, "Failed to read trailing fragment of dsp\n");
 		goto err;
 	}
 	*(unsigned int *)&buf[0] = payload;
 	len_pos = b[0];
 	len_pos |= (b[1] & 0xc0) << 2;
 	if (len_pos != frag_len) {
-		dev_err(codec->dev, "LEN_POST = %02X, expected %02X\n",
+		dev_err(component->dev, "LEN_POST = %02X, expected %02X\n",
 			len_pos, frag_len);
 		ret = -EPROTO;
 		goto err;
@@ -383,28 +378,28 @@ static int nau8310_reply_from_dsp(struct snd_soc_codec *codec,
 		pad_len_exp = 0;
 	}
 	if (pad_len != pad_len_exp) {
-		dev_err(codec->dev, "PAD_LEN = %02X, expected %02X\n",
+		dev_err(component->dev, "PAD_LEN = %02X, expected %02X\n",
 			pad_len, pad_len_exp);
 		ret = -EPROTO;
 		goto err;
 	}
 
-	dev_dbg(codec->dev, "LEN_POST = 0x%x, PAD_LEN 0x%x\n",
+	dev_dbg(component->dev, "LEN_POST = 0x%x, PAD_LEN 0x%x\n",
 		len_pos, pad_len);
-	dev_dbg(codec->dev, "[R] %02x %02x %02x %02x\n",
+	dev_dbg(component->dev, "[R] %02x %02x %02x %02x\n",
 		buf[0], buf[1], buf[2], buf[3]);
 
 done:
 	return 0;
 err:
-	dev_err(codec->dev, "DSP reply error %d !!!\n", ret);
+	dev_err(component->dev, "DSP reply error %d !!!\n", ret);
 	return ret;
 }
 
 /**
  * nau8310_send_dsp_command - Send command to DSP
  *
- * @codec:  codec to register
+ * @component:  component to register
  * @cmd_id:  DSP supported command ID
  * @kcs_setup: KCS setup structure
  *
@@ -419,13 +414,13 @@ err:
  * These commands include getting the information of DSP,
  * getting or setting KCS configuration, or making DSP control.
  */
-int nau8310_send_dsp_command(struct snd_soc_codec *codec,
+int nau8310_send_dsp_command(struct snd_soc_component *component,
 			     int cmd_id, struct nau8310_kcs_setup *kcs_setup)
 {
 	const struct nau8310_cmd_info *cmd_info;
 	int ret, frag_len = 0;
 
-	if (!codec)
+	if (!component)
 		return -EINVAL;
 
 	if (!kcs_setup) {
@@ -433,7 +428,7 @@ int nau8310_send_dsp_command(struct snd_soc_codec *codec,
 		goto msg_fail;
 	}
 	if (!nau8310_dsp_commands(cmd_id)) {
-		dev_err(codec->dev, "Command not support!\n");
+		dev_err(component->dev, "Command not support!\n");
 		ret = -EINVAL;
 		goto msg_fail;
 	}
@@ -466,13 +461,13 @@ int nau8310_send_dsp_command(struct snd_soc_codec *codec,
 	if (cmd_info->setup_data)
 		frag_len += (kcs_setup->set_len +
 			NAU8310_DSP_DATA_BYTE - 1) / NAU8310_DSP_DATA_BYTE;
-	ret = nau8310_massage_to_dsp(codec, cmd_info, frag_len,
+	ret = nau8310_massage_to_dsp(component, cmd_info, frag_len,
 		kcs_setup->set_kcs_offset, kcs_setup->set_len,
 		kcs_setup->set_kcs_data);
 	if (ret)
 		goto msg_fail;
 
-	ret = nau8310_reply_from_dsp(codec, cmd_info,
+	ret = nau8310_reply_from_dsp(component, cmd_info,
 		kcs_setup->get_len, kcs_setup->get_data);
 	if (ret)
 		goto reply_fail;
@@ -480,18 +475,18 @@ int nau8310_send_dsp_command(struct snd_soc_codec *codec,
 	return 0;
 
 msg_fail:
-	dev_err(codec->dev, "Fail to send a message(%d) to dsp, ret %d.\n",
+	dev_err(component->dev, "Fail to send a message(%d) to dsp, ret %d.\n",
 		cmd_id, ret);
 	return ret;
 reply_fail:
-	dev_err(codec->dev, "Reply fail (%d) from dsp.\n", ret);
+	dev_err(component->dev, "Reply fail (%d) from dsp.\n", ret);
 	return ret;
 }
 
 /**
  * nau8310_dsp_kcs_setup - Send KCS setup command to DSP
  *
- * @codec:  codec to register
+ * @component:  component to register
  * @offset: address offset relative to KCS start
  * @size: size of data writen to KCS
  * @data: data writen to KCS setup
@@ -501,7 +496,7 @@ reply_fail:
  * the DSP is 96 bytes. Therefore, the driver has to split the data into
  * 96 bytes chucks, if the setup configuration over the threshold.
  */
-int nau8310_dsp_kcs_setup(struct snd_soc_codec *codec,
+int nau8310_dsp_kcs_setup(struct snd_soc_component *component,
 			  int offset, int size, const void *data)
 {
 	struct nau8310_kcs_setup kcs_setup_comp, *kcs_setup = &kcs_setup_comp;
@@ -532,7 +527,7 @@ int nau8310_dsp_kcs_setup(struct snd_soc_codec *codec,
 		kcs_setup->set_kcs_offset = addr_offset;
 		kcs_setup->set_len = data_len;
 		kcs_setup->set_kcs_data = data_buf;
-		ret = nau8310_send_dsp_command(codec, cmd_id, kcs_setup);
+		ret = nau8310_send_dsp_command(component, cmd_id, kcs_setup);
 		if (ret < 0) {
 			if (retries++ < NAU8310_DSP_RETRY_MAX)
 				continue;
@@ -548,7 +543,7 @@ int nau8310_dsp_kcs_setup(struct snd_soc_codec *codec,
 		kcs_setup->set_kcs_offset = 0;
 		kcs_setup->set_len = NAU8310_DSP_DATA_BYTE;
 		kcs_setup->get_len = kcs_setup->set_len;
-		ret = nau8310_send_dsp_command(codec, cmd_id, kcs_setup);
+		ret = nau8310_send_dsp_command(component, cmd_id, kcs_setup);
 		if (ret < 0)
 			goto msg_fail;
 	}
@@ -556,7 +551,7 @@ int nau8310_dsp_kcs_setup(struct snd_soc_codec *codec,
 	return 0;
 
 msg_fail:
-	dev_err(codec->dev, "Fail to send a kcs setup message(%d) to dsp, ret %d.\n",
+	dev_err(component->dev, "Fail to send a kcs setup message(%d) to dsp, ret %d.\n",
 		cmd_id, ret);
 	return ret;
 }
@@ -564,23 +559,23 @@ msg_fail:
 static int nau8310_dsp_get_counter_put(struct snd_kcontrol *kcontrol,
 				       struct snd_ctl_elem_value *ucontrol)
 {
-	struct snd_soc_codec *codec =
-			snd_soc_kcontrol_codec(kcontrol);
+	struct snd_soc_component *component =
+			snd_soc_kcontrol_component(kcontrol);
 	struct nau8310_kcs_setup kcs_setup_comp, *kcs_setup = &kcs_setup_comp;
 	int ret, counter;
 
-	dev_info(codec->dev, "Send DSP command %s\n",
+	dev_info(component->dev, "Send DSP command %s\n",
 		 dsp_cmd_table[NAU8310_DSP_CMD_GET_COUNTER]);
 
 	kcs_setup->get_len = kcs_setup->set_len = sizeof(counter);
 	kcs_setup->get_data = (void *)&counter;
-	ret = nau8310_send_dsp_command(codec,
+	ret = nau8310_send_dsp_command(component,
 				       NAU8310_DSP_CMD_GET_COUNTER, kcs_setup);
 	if (ret) {
-		dev_err(codec->dev, "Send DSP command %s fail (%d)\n",
+		dev_err(component->dev, "Send DSP command %s fail (%d)\n",
 			dsp_cmd_table[NAU8310_DSP_CMD_GET_COUNTER], ret);
 	} else {
-		dev_info(codec->dev, "DSP counter %d\n", counter);
+		dev_info(component->dev, "DSP counter %d\n", counter);
 	}
 
 	return 0;
@@ -589,22 +584,22 @@ static int nau8310_dsp_get_counter_put(struct snd_kcontrol *kcontrol,
 static int nau8310_dsp_get_revision_put(struct snd_kcontrol *kcontrol,
 					struct snd_ctl_elem_value *ucontrol)
 {
-	struct snd_soc_codec *codec =
-			snd_soc_kcontrol_codec(kcontrol);
+	struct snd_soc_component *component =
+			snd_soc_kcontrol_component(kcontrol);
 	struct nau8310_kcs_setup kcs_setup_comp, *kcs_setup = &kcs_setup_comp;
 	int ret, version;
 
-	dev_info(codec->dev, "Send DSP command %s\n",
+	dev_info(component->dev, "Send DSP command %s\n",
 		 dsp_cmd_table[NAU8310_DSP_CMD_GET_REVISION]);
 	kcs_setup->get_len = kcs_setup->set_len = sizeof(version);
 	kcs_setup->get_data = (void *)&version;
-	ret = nau8310_send_dsp_command(codec,
+	ret = nau8310_send_dsp_command(component,
 				       NAU8310_DSP_CMD_GET_REVISION, kcs_setup);
 	if (ret) {
-		dev_err(codec->dev, "Send DSP command %s fail (%d)\n",
+		dev_err(component->dev, "Send DSP command %s fail (%d)\n",
 			dsp_cmd_table[NAU8310_DSP_CMD_GET_REVISION], ret);
 	} else {
-		dev_info(codec->dev, "DSP version %x\n", version);
+		dev_info(component->dev, "DSP version %x\n", version);
 	}
 
 	return 0;
@@ -613,22 +608,22 @@ static int nau8310_dsp_get_revision_put(struct snd_kcontrol *kcontrol,
 static int nau8310_dsp_get_frame_status_put(struct snd_kcontrol *kcontrol,
 					    struct snd_ctl_elem_value *ucontrol)
 {
-	struct snd_soc_codec *codec =
-			snd_soc_kcontrol_codec(kcontrol);
+	struct snd_soc_component *component =
+			snd_soc_kcontrol_component(kcontrol);
 	struct nau8310_kcs_setup kcs_setup_comp, *kcs_setup = &kcs_setup_comp;
 	int ret, status;
 
-	dev_info(codec->dev, "Send DSP command %s\n",
+	dev_info(component->dev, "Send DSP command %s\n",
 		 dsp_cmd_table[NAU8310_DSP_CMD_GET_FRAME_STATUS]);
 	kcs_setup->get_len = kcs_setup->set_len = sizeof(status);
 	kcs_setup->get_data = (void *)&status;
-	ret = nau8310_send_dsp_command(codec,
+	ret = nau8310_send_dsp_command(component,
 				       NAU8310_DSP_CMD_GET_FRAME_STATUS, kcs_setup);
 	if (ret) {
-		dev_err(codec->dev, "Send DSP command %s fail (%d)\n",
+		dev_err(component->dev, "Send DSP command %s fail (%d)\n",
 			dsp_cmd_table[NAU8310_DSP_CMD_GET_FRAME_STATUS], ret);
 	} else {
-		dev_info(codec->dev, "DSP frame status %x\n", status);
+		dev_info(component->dev, "DSP frame status %x\n", status);
 	}
 
 	return 0;
@@ -637,9 +632,9 @@ static int nau8310_dsp_get_frame_status_put(struct snd_kcontrol *kcontrol,
 static int nau8310_dsp_get_kcs_setup_put(struct snd_kcontrol *kcontrol,
 					 struct snd_ctl_elem_value *ucontrol)
 {
-	struct snd_soc_codec *codec =
-			snd_soc_kcontrol_codec(kcontrol);
-	struct nau8310 *nau8310 = snd_soc_codec_get_drvdata(codec);
+	struct snd_soc_component *component =
+			snd_soc_kcontrol_component(kcontrol);
+	struct nau8310 *nau8310 = snd_soc_component_get_drvdata(component);
 	struct nau8310_kcs_setup kcs_setup_comp, *kcs_setup = &kcs_setup_comp;
 	int ret, i, buf_off, buf_len, count;
 	char *data, buf[100];
@@ -651,7 +646,7 @@ static int nau8310_dsp_get_kcs_setup_put(struct snd_kcontrol *kcontrol,
 	if (nau8310->kcs_setup_size == 0) {
 		kfree(data);
 		ret = -EINVAL;
-		dev_err(codec->dev, "KCS of DSP not load yet (%d)\n", ret);
+		dev_err(component->dev, "KCS of DSP not load yet (%d)\n", ret);
 		return ret;
 	}
 	buf_off = 0;
@@ -661,15 +656,15 @@ static int nau8310_dsp_get_kcs_setup_put(struct snd_kcontrol *kcontrol,
 	kcs_setup->set_kcs_offset = buf_off;
 	kcs_setup->get_len = kcs_setup->set_len = buf_len;
 	kcs_setup->get_data = data;
-	ret = nau8310_send_dsp_command(codec,
+	ret = nau8310_send_dsp_command(component,
 				       NAU8310_DSP_CMD_GET_KCS_SETUP, kcs_setup);
 	if (ret) {
-		dev_err(codec->dev, "Send DSP command %s fail (%d)\n",
+		dev_err(component->dev, "Send DSP command %s fail (%d)\n",
 			dsp_cmd_table[NAU8310_DSP_CMD_GET_KCS_SETUP], ret);
 	} else {
-		dev_dbg(codec->dev, "DSP KCS result:\n");
+		dev_dbg(component->dev, "DSP KCS result:\n");
 		for (i = 0; i < kcs_setup->get_len; i += 16) {
-			dev_dbg(codec->dev,	"%02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x",
+			dev_dbg(component->dev,	"%02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x",
 				data[i], data[i+1], data[i+2], data[i+3],
 				data[i+4], data[i+5], data[i+6], data[i+7],
 				data[i+8], data[i+9], data[i+10], data[i+11],
@@ -680,8 +675,8 @@ static int nau8310_dsp_get_kcs_setup_put(struct snd_kcontrol *kcontrol,
 		count = 0;
 		for (; i < kcs_setup->get_len; i++)
 			count += sprintf(buf + count, "%02x ", data[i]);
-		dev_dbg(codec->dev, "%s", buf);
-		dev_info(codec->dev, "Get length %d of kcs_setup\n",
+		dev_dbg(component->dev, "%s", buf);
+		dev_info(component->dev, "Get length %d of kcs_setup\n",
 			 kcs_setup->get_len);
 	}
 	kfree(data);
@@ -692,9 +687,9 @@ static int nau8310_dsp_get_kcs_setup_put(struct snd_kcontrol *kcontrol,
 static int nau8310_dsp_set_kcs_setup_put(struct snd_kcontrol *kcontrol,
 					 struct snd_ctl_elem_value *ucontrol)
 {
-	struct snd_soc_codec *codec =
-			snd_soc_kcontrol_codec(kcontrol);
-	struct nau8310 *nau8310 = snd_soc_codec_get_drvdata(codec);
+	struct snd_soc_component *component =
+			snd_soc_kcontrol_component(kcontrol);
+	struct nau8310 *nau8310 = snd_soc_component_get_drvdata(component);
 
 	nau8310_sw_reset_chip(nau8310->regmap);
 	/* wait for the power ready */
@@ -702,24 +697,24 @@ static int nau8310_dsp_set_kcs_setup_put(struct snd_kcontrol *kcontrol,
 	regmap_update_bits(nau8310->regmap, NAU8310_R1A_DSP_CORE_CTRL2,
 			   NAU8310_DSP_RUNSTALL, 0);
 
-	return nau8310_dsp_set_kcs_setup(codec, false);
+	return nau8310_dsp_set_kcs_setup(component, false);
 }
 
 static int nau8310_dsp_clk_restart_put(struct snd_kcontrol *kcontrol,
 				       struct snd_ctl_elem_value *ucontrol)
 {
-	struct snd_soc_codec *codec =
-			snd_soc_kcontrol_codec(kcontrol);
+	struct snd_soc_component *component =
+			snd_soc_kcontrol_component(kcontrol);
 	struct nau8310_kcs_setup kcs_setup_comp, *kcs_setup = &kcs_setup_comp;
 	int ret;
 
-	dev_info(codec->dev, "Send DSP command %s\n",
+	dev_info(component->dev, "Send DSP command %s\n",
 		 dsp_cmd_table[NAU8310_DSP_CMD_CLK_RESTART]);
 
-	ret = nau8310_send_dsp_command(codec,
+	ret = nau8310_send_dsp_command(component,
 				       NAU8310_DSP_CMD_CLK_RESTART, kcs_setup);
 	if (ret)
-		dev_err(codec->dev, "Send DSP command %s fail (%d)\n",
+		dev_err(component->dev, "Send DSP command %s fail (%d)\n",
 			dsp_cmd_table[NAU8310_DSP_CMD_CLK_RESTART], ret);
 
 	return 0;
@@ -728,18 +723,18 @@ static int nau8310_dsp_clk_restart_put(struct snd_kcontrol *kcontrol,
 static int nau8310_dsp_clk_stop_put(struct snd_kcontrol *kcontrol,
 				    struct snd_ctl_elem_value *ucontrol)
 {
-	struct snd_soc_codec *codec =
-			snd_soc_kcontrol_codec(kcontrol);
+	struct snd_soc_component *component =
+			snd_soc_kcontrol_component(kcontrol);
 	struct nau8310_kcs_setup kcs_setup_comp, *kcs_setup = &kcs_setup_comp;
 	int ret;
 
-	dev_info(codec->dev, "Send DSP command %s\n",
+	dev_info(component->dev, "Send DSP command %s\n",
 		 dsp_cmd_table[NAU8310_DSP_CMD_CLK_STOP]);
 
-	ret = nau8310_send_dsp_command(codec,
+	ret = nau8310_send_dsp_command(component,
 				       NAU8310_DSP_CMD_CLK_STOP, kcs_setup);
 	if (ret)
-		dev_err(codec->dev, "Send DSP command %s fail (%d)\n",
+		dev_err(component->dev, "Send DSP command %s fail (%d)\n",
 			dsp_cmd_table[NAU8310_DSP_CMD_CLK_STOP], ret);
 
 	return 0;
@@ -775,8 +770,8 @@ static int nau8310_dsp_snd_soc_dapm_put(struct snd_kcontrol *kcontrol,
 {
 	struct snd_soc_dapm_context *dapm =
 			snd_soc_dapm_kcontrol_dapm(kcontrol);
-	struct snd_soc_codec *codec = snd_soc_dapm_to_codec(dapm);
-	struct nau8310 *nau8310 = snd_soc_codec_get_drvdata(codec);
+	struct snd_soc_component *component = snd_soc_dapm_to_component(dapm);
+	struct nau8310 *nau8310 = snd_soc_component_get_drvdata(component);
 	struct soc_mixer_control *mc =
 			(struct soc_mixer_control *)kcontrol->private_value;
 	int reg = mc->reg;
@@ -788,7 +783,7 @@ static int nau8310_dsp_snd_soc_dapm_put(struct snd_kcontrol *kcontrol,
 
 	ret = regmap_read(nau8310->regmap, reg, &orig);
 	if (ret) {
-		dev_err(codec->dev, "Failed to read register: %d\n", ret);
+		dev_err(component->dev, "Failed to read register: %d\n", ret);
 		return ret;
 	}
 
@@ -804,7 +799,7 @@ static int nau8310_dsp_snd_soc_dapm_put(struct snd_kcontrol *kcontrol,
 		msleep(200);
 		regmap_update_bits(nau8310->regmap, NAU8310_R1A_DSP_CORE_CTRL2,
 				   NAU8310_DSP_RUNSTALL, 0);
-		ret = nau8310_dsp_set_kcs_setup(codec, false);
+		ret = nau8310_dsp_set_kcs_setup(component, false);
 		if (ret)
 			return -EINVAL;
 	}
@@ -823,20 +818,20 @@ static const struct snd_kcontrol_new nau8310_dacdat_select_dsp =
 static int nau8310_dsp_clock_event(struct snd_soc_dapm_widget *w,
 				   struct snd_kcontrol *kcontrol, int event)
 {
-	struct snd_soc_codec *codec =
-			snd_soc_dapm_to_codec(w->dapm);
-	struct nau8310 *nau8310 = snd_soc_codec_get_drvdata(codec);
+	struct snd_soc_component *component =
+			snd_soc_dapm_to_component(w->dapm);
+	struct nau8310 *nau8310 = snd_soc_component_get_drvdata(component);
 	struct nau8310_kcs_setup kcs_setup_comp, *kcs_setup = &kcs_setup_comp;
 	int ret;
 
 	switch (event) {
 	case SND_SOC_DAPM_PRE_PMU:
-		dev_dbg(codec->dev, "Send DSP command %s\n",
+		dev_dbg(component->dev, "Send DSP command %s\n",
 			dsp_cmd_table[NAU8310_DSP_CMD_CLK_RESTART]);
-		ret = nau8310_send_dsp_command(codec,
+		ret = nau8310_send_dsp_command(component,
 					       NAU8310_DSP_CMD_CLK_RESTART, kcs_setup);
 		if (ret)
-			dev_err(codec->dev, "Send DSP command %s fail (%d)\n",
+			dev_err(component->dev, "Send DSP command %s fail (%d)\n",
 				dsp_cmd_table[NAU8310_DSP_CMD_CLK_RESTART],
 				ret);
 		/* Switch the clock source of DSP to MCLK. */
@@ -844,12 +839,12 @@ static int nau8310_dsp_clock_event(struct snd_soc_dapm_widget *w,
 				   NAU8310_DSP_SEL_OSC, 0);
 		break;
 	case SND_SOC_DAPM_POST_PMD:
-		dev_dbg(codec->dev, "Send DSP command %s\n",
+		dev_dbg(component->dev, "Send DSP command %s\n",
 			dsp_cmd_table[NAU8310_DSP_CMD_CLK_STOP]);
-		ret = nau8310_send_dsp_command(codec,
+		ret = nau8310_send_dsp_command(component,
 					       NAU8310_DSP_CMD_CLK_STOP, kcs_setup);
 		if (ret)
-			dev_err(codec->dev, "Send DSP command %s fail (%d)\n",
+			dev_err(component->dev, "Send DSP command %s fail (%d)\n",
 				dsp_cmd_table[NAU8310_DSP_CMD_CLK_STOP], ret);
 		break;
 	default:
@@ -877,13 +872,13 @@ static const struct snd_soc_dapm_route nau8310_dsp_dapm_routes[] = {
 
 static void nau8310_dsp_fw_cb(const struct firmware *fw, void *context)
 {
-	struct snd_soc_codec *codec = context;
-	struct nau8310 *nau8310 = snd_soc_codec_get_drvdata(codec);
+	struct snd_soc_component *component = context;
+	struct nau8310 *nau8310 = snd_soc_component_get_drvdata(component);
 	struct snd_soc_dapm_context *dapm = nau8310->dapm;
 	int ret, buf_off, buf_len;
 
 	if (!fw) {
-		dev_err(codec->dev, "Cannot load firmware %s\n",
+		dev_err(component->dev, "Cannot load firmware %s\n",
 			NAU8310_DSP_FIRMWARE);
 		goto err;
 	}
@@ -893,13 +888,13 @@ static void nau8310_dsp_fw_cb(const struct firmware *fw, void *context)
 	buf_off = 0;
 	buf_len = nau8310->kcs_setup_size = fw->size;
 
-	dev_dbg(codec->dev, "Send DSP command %s (OFF %d, LEN %d)\n",
+	dev_dbg(component->dev, "Send DSP command %s (OFF %d, LEN %d)\n",
 		dsp_cmd_table[NAU8310_DSP_CMD_SET_KCS_SETUP],
 		buf_off, buf_len);
 
-	ret = nau8310_dsp_kcs_setup(codec, buf_off, buf_len, fw->data);
+	ret = nau8310_dsp_kcs_setup(component, buf_off, buf_len, fw->data);
 	if (ret) {
-		dev_err(codec->dev, "Send DSP command %s fail (%d)\n",
+		dev_err(component->dev, "Send DSP command %s fail (%d)\n",
 			dsp_cmd_table[NAU8310_DSP_CMD_SET_KCS_SETUP], ret);
 		goto err;
 	}
@@ -919,51 +914,51 @@ err:
 			   NAU8310_SOFT_MUTE, 0);
 }
 
-static int nau8310_dsp_set_kcs_setup(struct snd_soc_codec *codec, bool nowait)
+static int nau8310_dsp_set_kcs_setup(struct snd_soc_component *component, bool nowait)
 {
-	struct nau8310 *nau8310 = snd_soc_codec_get_drvdata(codec);
+	struct nau8310 *nau8310 = snd_soc_component_get_drvdata(component);
 	struct nau8310_kcs_setup kcs_setup_comp, *kcs_setup = &kcs_setup_comp;
 	const struct firmware *fw;
 	int ret, status = 0, buf_off, buf_len;
 
-	dev_dbg(codec->dev, "Send DSP command %s\n",
+	dev_dbg(component->dev, "Send DSP command %s\n",
 		dsp_cmd_table[NAU8310_DSP_CMD_GET_FRAME_STATUS]);
 
 	kcs_setup->get_len = kcs_setup->set_len = sizeof(status);
 	kcs_setup->get_data = (void *)&status;
 
-	ret = nau8310_send_dsp_command(codec,
+	ret = nau8310_send_dsp_command(component,
 				       NAU8310_DSP_CMD_GET_FRAME_STATUS, kcs_setup);
 	if (ret) {
-		dev_err(codec->dev, "Send DSP command %s fail (%d)\n",
+		dev_err(component->dev, "Send DSP command %s fail (%d)\n",
 			dsp_cmd_table[NAU8310_DSP_CMD_GET_FRAME_STATUS], ret);
 		goto err;
 	}
 
 	if (!(status & NAU8310_DSP_ALGO_OK)) {
-		dev_err(codec->dev, "Algorithm of DSP is not ready, status %x\n",
+		dev_err(component->dev, "Algorithm of DSP is not ready, status %x\n",
 			status);
 		ret = -EIO;
 		goto err;
 	}
 
-	dev_info(codec->dev, "Algorithm of DSP is ready, status %x\n", status);
+	dev_info(component->dev, "Algorithm of DSP is ready, status %x\n", status);
 
 	if (nowait) {
-		dev_dbg(codec->dev, "Request firmware and no wait.\n");
+		dev_dbg(component->dev, "Request firmware and no wait.\n");
 		ret = request_firmware_nowait(THIS_MODULE, true,
 					      NAU8310_DSP_FIRMWARE,
-					      codec->dev, GFP_KERNEL,
-					      codec, nau8310_dsp_fw_cb);
+					      component->dev, GFP_KERNEL,
+					      component, nau8310_dsp_fw_cb);
 		if (ret) {
-			dev_err(codec->dev, "Failed to load firmware (%d)\n", ret);
+			dev_err(component->dev, "Failed to load firmware (%d)\n", ret);
 			goto err;
 		}
 	} else {
-		dev_dbg(codec->dev, "Request firmware and wait until finish.\n");
-		ret = request_firmware(&fw, NAU8310_DSP_FIRMWARE, codec->dev);
+		dev_dbg(component->dev, "Request firmware and wait until finish.\n");
+		ret = request_firmware(&fw, NAU8310_DSP_FIRMWARE, component->dev);
 		if (ret) {
-			dev_err(codec->dev, "Failed to load firmware (%d)\n", ret);
+			dev_err(component->dev, "Failed to load firmware (%d)\n", ret);
 			goto err;
 		}
 		regmap_update_bits(nau8310->regmap, NAU8310_R13_MUTE_CTRL,
@@ -971,12 +966,12 @@ static int nau8310_dsp_set_kcs_setup(struct snd_soc_codec *codec, bool nowait)
 
 		buf_off = 0;
 		buf_len = nau8310->kcs_setup_size = fw->size;
-		dev_dbg(codec->dev, "Send DSP command %s (OFF %d, LEN %d)\n",
+		dev_dbg(component->dev, "Send DSP command %s (OFF %d, LEN %d)\n",
 			dsp_cmd_table[NAU8310_DSP_CMD_SET_KCS_SETUP],
 			buf_off, buf_len);
-		ret = nau8310_dsp_kcs_setup(codec, buf_off, buf_len, fw->data);
+		ret = nau8310_dsp_kcs_setup(component, buf_off, buf_len, fw->data);
 		if (ret) {
-			dev_err(codec->dev, "Send DSP command %s fail (%d)\n",
+			dev_err(component->dev, "Send DSP command %s fail (%d)\n",
 				dsp_cmd_table[NAU8310_DSP_CMD_SET_KCS_SETUP],
 				ret);
 			goto err_loaded;
@@ -997,34 +992,34 @@ err:
 	return ret;
 }
 
-int nau8310_dsp_init(struct snd_soc_codec *codec)
+int nau8310_dsp_init(struct snd_soc_component *component)
 {
-	struct nau8310 *nau8310 = snd_soc_codec_get_drvdata(codec);
+	struct nau8310 *nau8310 = snd_soc_component_get_drvdata(component);
 	struct snd_soc_dapm_context *dapm = nau8310->dapm;
 	int ret;
 
-	dev_dbg(codec->dev, "DSP initializing...\n");
+	dev_dbg(component->dev, "DSP initializing...\n");
 
-	ret = nau8310_dsp_set_kcs_setup(codec, true);
+	ret = nau8310_dsp_set_kcs_setup(component, false);
 	if (ret)
 		goto err;
 
-	ret = snd_soc_add_codec_controls(codec, nau8310_dsp_snd_controls,
+	ret = snd_soc_add_component_controls(component, nau8310_dsp_snd_controls,
 					     ARRAY_SIZE(nau8310_dsp_snd_controls));
 	if (ret) {
-		dev_err(codec->dev, "Add DSP control fail (%d)\n", ret);
+		dev_err(component->dev, "Add DSP control fail (%d)\n", ret);
 		goto err;
 	}
 	ret = snd_soc_dapm_new_controls(dapm, nau8310_dsp_dapm_widgets,
 					ARRAY_SIZE(nau8310_dsp_dapm_widgets));
 	if (ret) {
-		dev_err(codec->dev, "Add DSP widget fail (%d)\n", ret);
+		dev_err(component->dev, "Add DSP widget fail (%d)\n", ret);
 		goto err;
 	}
 	ret = snd_soc_dapm_add_routes(dapm, nau8310_dsp_dapm_routes,
 				      ARRAY_SIZE(nau8310_dsp_dapm_routes));
 	if (ret) {
-		dev_err(codec->dev, "Add DSP route fail (%d)\n", ret);
+		dev_err(component->dev, "Add DSP route fail (%d)\n", ret);
 		goto err;
 	}
 
@@ -1036,8 +1031,8 @@ err:
 }
 EXPORT_SYMBOL_GPL(nau8310_dsp_init);
 
-int nau8310_dsp_resume(struct snd_soc_codec *codec)
+int nau8310_dsp_resume(struct snd_soc_component *component)
 {
-	return nau8310_dsp_set_kcs_setup(codec, false);
+	return nau8310_dsp_set_kcs_setup(component, false);
 }
 EXPORT_SYMBOL_GPL(nau8310_dsp_resume);

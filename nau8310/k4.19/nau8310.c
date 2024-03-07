@@ -30,7 +30,7 @@
 #include "nau8310.h"
 #include "nau8310-dsp.h"
 static void nau8310_software_reset(struct regmap *regmap);
-static int nau8310_set_sysclk(struct snd_soc_codec *codec, int clk_id,
+static int nau8310_set_sysclk(struct snd_soc_component *component, int clk_id,
 			      int source, unsigned int freq, int dir);
 
 /* Range of Master Clock MCLK (Hz) */
@@ -272,8 +272,9 @@ static int nau8310_clkdet_put(struct snd_kcontrol *kcontrol,
 {
 	struct soc_mixer_control *mc =
 			(struct soc_mixer_control *)kcontrol->private_value;
-	struct snd_soc_codec *codec = snd_kcontrol_chip(kcontrol);
-	struct nau8310 *nau8310 = snd_soc_codec_get_drvdata(codec);
+	struct snd_soc_component *component =
+			snd_soc_kcontrol_component(kcontrol);
+	struct nau8310 *nau8310 = snd_soc_component_get_drvdata(component);
 	unsigned int max = mc->max, min = mc->min, val;
 	unsigned int mask = (1 << fls(max)) - 1;
 
@@ -293,10 +294,71 @@ static int nau8310_clkdet_put(struct snd_kcontrol *kcontrol,
 int nau8310_clkdet_get(struct snd_kcontrol *kcontrol,
 		       struct snd_ctl_elem_value *ucontrol)
 {
-	struct snd_soc_codec *codec = snd_kcontrol_chip(kcontrol);
-	struct nau8310 *nau8310 = snd_soc_codec_get_drvdata(codec);
+	struct snd_soc_component *component =
+			snd_soc_kcontrol_component(kcontrol);
+	struct nau8310 *nau8310 = snd_soc_component_get_drvdata(component);
 
 	ucontrol->value.integer.value[0] = nau8310->clock_detection;
+
+	return 0;
+}
+
+static int nau8310_biq_coeff_get(struct snd_kcontrol *kcontrol,
+				 struct snd_ctl_elem_value *ucontrol)
+{
+	struct snd_soc_component *component =
+			snd_soc_kcontrol_component(kcontrol);
+	struct nau8310 *nau8310 = snd_soc_component_get_drvdata(component);
+	struct soc_bytes_ext *params = (void *)kcontrol->private_value;
+	int i, reg, reg_val;
+	u16 *val;
+
+	val = (u16 *)ucontrol->value.bytes.data;
+	reg = NAU8310_R80_BIQ0_COE_1;
+	for (i = 0; i < params->max / sizeof(u16); i++) {
+		regmap_read(nau8310->regmap, reg + i, &reg_val);
+		/* conversion of 16-bit integers between native CPU format
+		 * and big endian format
+		 */
+		reg_val = cpu_to_be16(reg_val);
+		*(val + i) = reg_val;
+	}
+
+	return 0;
+}
+
+static int nau8310_biq_coeff_put(struct snd_kcontrol *kcontrol,
+				 struct snd_ctl_elem_value *ucontrol)
+{
+	struct snd_soc_component *component =
+			snd_soc_kcontrol_component(kcontrol);
+	struct nau8310 *nau8310 = snd_soc_component_get_drvdata(component);
+	struct soc_bytes_ext *params = (void *)kcontrol->private_value;
+	void *data;
+	u16 *val, value;
+	int i, reg, ret;
+
+	data = kmemdup(ucontrol->value.bytes.data,
+		       params->max, GFP_KERNEL | GFP_DMA);
+	if (!data)
+		return -ENOMEM;
+
+	val = (u16 *)data;
+	reg = NAU8310_R80_BIQ0_COE_1;
+	for (i = 0; i < params->max / sizeof(u16); i++) {
+		/* conversion of 16-bit integers between native CPU format
+		 * and big endian format
+		 */
+		value = be16_to_cpu(*(val + i));
+		ret = regmap_write(nau8310->regmap, reg + i, value);
+		if (ret) {
+			dev_err(nau8310->dev, "BIQ configuration fail, register: %x ret: %d\n",
+				reg + i, ret);
+			kfree(data);
+			return ret;
+		}
+	}
+	kfree(data);
 
 	return 0;
 }
@@ -388,6 +450,8 @@ static const DECLARE_TLV_DB_MINMAX(pga_gain_tlv, 0, 1600);
 static const struct snd_kcontrol_new nau8310_snd_controls[] = {
 	SOC_ENUM("ADC Decimation Rate", nau8310_adc_decimation_enum),
 	SOC_ENUM("DAC Oversampling Rate", nau8310_dac_oversampl_enum),
+	SND_SOC_BYTES_EXT("BIQ Coefficients", 60,
+			  nau8310_biq_coeff_get, nau8310_biq_coeff_put),
 
 	SOC_SINGLE_TLV("ADC Left Channel Volume",
 		       NAU8310_R14_ADC_VOL_CTRL, NAU8310_ADC_GAIN_L_SFT,
@@ -470,7 +534,9 @@ static const struct snd_kcontrol_new nau8310_alc_gain_select =
 static int nau8310_clock_event(struct snd_soc_dapm_widget *w,
 			       struct snd_kcontrol *kcontrol, int event)
 {
-	struct nau8310 *nau8310 = snd_soc_codec_get_drvdata(w->codec);
+	struct snd_soc_component *component =
+			snd_soc_dapm_to_component(w->dapm);
+	struct nau8310 *nau8310 = snd_soc_component_get_drvdata(component);
 
 	switch (event) {
 	case SND_SOC_DAPM_PRE_PMU:
@@ -488,7 +554,9 @@ static int nau8310_clock_event(struct snd_soc_dapm_widget *w,
 static int nau8310_powerup_event(struct snd_soc_dapm_widget *w,
 				 struct snd_kcontrol *kcontrol, int event)
 {
-	struct nau8310 *nau8310 = snd_soc_codec_get_drvdata(w->codec);
+	struct snd_soc_component *component =
+			snd_soc_dapm_to_component(w->dapm);
+	struct nau8310 *nau8310 = snd_soc_component_get_drvdata(component);
 
 	if (nau8310->clock_detection)
 		return 0;
@@ -512,7 +580,9 @@ static int nau8310_powerup_event(struct snd_soc_dapm_widget *w,
 static int nau8310_adc_event(struct snd_soc_dapm_widget *w,
 			     struct snd_kcontrol *kcontrol, int event)
 {
-	struct nau8310 *nau8310 = snd_soc_codec_get_drvdata(w->codec);
+	struct snd_soc_component *component =
+			snd_soc_dapm_to_component(w->dapm);
+	struct nau8310 *nau8310 = snd_soc_component_get_drvdata(component);
 
 	switch (event) {
 	case SND_SOC_DAPM_POST_PMU:
@@ -533,7 +603,9 @@ static int nau8310_adc_event(struct snd_soc_dapm_widget *w,
 static int nau8310_dac_event(struct snd_soc_dapm_widget *w,
 			     struct snd_kcontrol *kcontrol, int event)
 {
-	struct nau8310 *nau8310 = snd_soc_codec_get_drvdata(w->codec);
+	struct snd_soc_component *component =
+			snd_soc_dapm_to_component(w->dapm);
+	struct nau8310 *nau8310 = snd_soc_component_get_drvdata(component);
 
 	/* Soft mute to prevent the pop noise */
 	switch (event) {
@@ -561,7 +633,9 @@ static int nau8310_dac_event(struct snd_soc_dapm_widget *w,
 static int check_dsp_enabled(struct snd_soc_dapm_widget *source,
 			     struct snd_soc_dapm_widget *sink)
 {
-	struct nau8310 *nau8310 = snd_soc_codec_get_drvdata(source->codec);
+	struct snd_soc_component *component =
+			snd_soc_dapm_to_component(source->dapm);
+	struct nau8310 *nau8310 = snd_soc_component_get_drvdata(component);
 
 	return nau8310->dsp_enable;
 }
@@ -979,8 +1053,8 @@ err:
 static int nau8310_hw_params(struct snd_pcm_substream *substream,
 			     struct snd_pcm_hw_params *params, struct snd_soc_dai *dai)
 {
-	struct snd_soc_codec *codec = dai->codec;
-	struct nau8310 *nau8310 = snd_soc_codec_get_drvdata(codec);
+	struct snd_soc_component *component = dai->component;
+	struct nau8310 *nau8310 = snd_soc_component_get_drvdata(component);
 	unsigned int val_len = 0;
 	int ret;
 
@@ -993,17 +1067,17 @@ static int nau8310_hw_params(struct snd_pcm_substream *substream,
 	if (ret)
 		goto err;
 
-	switch (params_format(params)) {
-	case SNDRV_PCM_FORMAT_S16_LE:
+	switch (params_width(params)) {
+	case 16:
 		val_len |= NAU8310_I2S_DL_16;
 		break;
-	case SNDRV_PCM_FORMAT_S20_3LE:
+	case 20:
 		val_len |= NAU8310_I2S_DL_20;
 		break;
-	case SNDRV_PCM_FORMAT_S24_LE:
+	case 24:
 		val_len |= NAU8310_I2S_DL_24;
 		break;
-	case SNDRV_PCM_FORMAT_S32_LE:
+	case 32:
 		val_len |= NAU8310_I2S_DL_32;
 		break;
 	default:
@@ -1021,11 +1095,11 @@ err:
 
 static int nau8310_set_fmt(struct snd_soc_dai *dai, unsigned int fmt)
 {
-	struct snd_soc_codec *codec = dai->codec;
-	struct nau8310 *nau8310 = snd_soc_codec_get_drvdata(codec);
+	struct snd_soc_component *component = dai->component;
+	struct nau8310 *nau8310 = snd_soc_component_get_drvdata(component);
 	unsigned int ctrl1_val = 0, ctrl2_val = 0;
 
-	dev_dbg(codec->dev, "%s: fmt 0x%08X\n", __func__, fmt);
+	dev_dbg(component->dev, "%s: fmt 0x%08X\n", __func__, fmt);
 
 	switch (fmt & SND_SOC_DAIFMT_MASTER_MASK) {
 	case SND_SOC_DAIFMT_CBM_CFM:
@@ -1076,6 +1150,7 @@ static int nau8310_set_fmt(struct snd_soc_dai *dai, unsigned int fmt)
 
 	return 0;
 }
+
 /**
  * nau8310_set_tdm_slot - configure DAI TDM.
  * @dai: DAI
@@ -1092,8 +1167,8 @@ static int nau8310_set_fmt(struct snd_soc_dai *dai, unsigned int fmt)
 static int nau8310_set_tdm_slot(struct snd_soc_dai *dai, unsigned int tx_mask,
 				unsigned int rx_mask, int slots, int slot_width)
 {
-	struct snd_soc_codec *codec = dai->codec;
-	struct nau8310 *nau8310 = snd_soc_codec_get_drvdata(codec);
+	struct snd_soc_component *component = dai->component;
+	struct nau8310 *nau8310 = snd_soc_component_get_drvdata(component);
 	unsigned int ctrl0_val = 0, ctrl_val = 0;
 
 	if (slots > 8)
@@ -1186,17 +1261,17 @@ static int nau8310_set_tdm_slot(struct snd_soc_dai *dai, unsigned int tx_mask,
 
 int nau8310_startup(struct snd_pcm_substream *substream, struct snd_soc_dai *dai)
 {
-	struct snd_soc_codec *codec = dai->codec;
-	struct nau8310 *nau8310 = snd_soc_codec_get_drvdata(codec);
+	struct snd_soc_component *component = dai->component;
+	struct nau8310 *nau8310 = snd_soc_component_get_drvdata(component);
 	char widget_name[WIDGET_NAME_MAX_SIZE];
 
 	/* Avoid multi-codecs with prefix naming caused dapm widget not be
 	 * enabled/disabled state normally.
 	 */
 	if (nau8310->dsp_enable) {
-		if (codec->name_prefix) {
+		if (component->name_prefix) {
 			snprintf(widget_name, WIDGET_NAME_MAX_SIZE,
-				 "%s Sense", codec->name_prefix);
+				 "%s Sense", component->name_prefix);
 			snd_soc_dapm_enable_pin(nau8310->dapm, widget_name);
 		} else
 			snd_soc_dapm_enable_pin(nau8310->dapm, "Sense");
@@ -1208,8 +1283,8 @@ int nau8310_startup(struct snd_pcm_substream *substream, struct snd_soc_dai *dai
 static void nau8310_shutdown(struct snd_pcm_substream *substream,
 			     struct snd_soc_dai *dai)
 {
-	struct snd_soc_codec *codec = dai->codec;
-	struct nau8310 *nau8310 = snd_soc_codec_get_drvdata(codec);
+	struct snd_soc_component *component = dai->component;
+	struct nau8310 *nau8310 = snd_soc_component_get_drvdata(component);
 	char widget_name[WIDGET_NAME_MAX_SIZE];
 
 	if (nau8310->dsp_enable) {
@@ -1217,16 +1292,16 @@ static void nau8310_shutdown(struct snd_pcm_substream *substream,
 		/* Avoid multi-codecs with prefix naming caused dapm widget not be
 		 * enabled/disabled state normally.
 		 */
-		if (codec->name_prefix) {
+		if (component->name_prefix) {
 			snprintf(widget_name, WIDGET_NAME_MAX_SIZE,
-				 "%s Sense", codec->name_prefix);
+				 "%s Sense", component->name_prefix);
 			snd_soc_dapm_disable_pin(nau8310->dapm, widget_name);
 		} else
 			snd_soc_dapm_disable_pin(nau8310->dapm, "Sense");
 
 		/* For internal Ring OSC, the default fs apply to 48kHz */
 		nau8310->fs = 48000;
-		ret = nau8310_set_sysclk(codec, 0, 0,
+		ret = nau8310_set_sysclk(component, 0, 0,
 			nau8310->fs * 256, SND_SOC_CLOCK_IN);
 		if (ret)
 			goto err;
@@ -1243,10 +1318,10 @@ err:
 	return;
 }
 
-static int nau8310_set_sysclk(struct snd_soc_codec *codec,
+static int nau8310_set_sysclk(struct snd_soc_component *component,
 			      int clk_id, int source, unsigned int freq, int dir)
 {
-	struct nau8310 *nau8310 = snd_soc_codec_get_drvdata(codec);
+	struct nau8310 *nau8310 = snd_soc_component_get_drvdata(component);
 
 	if (freq < MASTER_CLK_MIN || freq > MASTER_CLK_MAX) {
 		dev_err(nau8310->dev, "Exceed the range of input clocks, MCLK %dHz\n",
@@ -1259,34 +1334,36 @@ static int nau8310_set_sysclk(struct snd_soc_codec *codec,
 	return 0;
 }
 
-static int nau8310_codec_probe(struct snd_soc_codec *codec)
+static int nau8310_codec_probe(struct snd_soc_component *component)
 {
-	struct nau8310 *nau8310 = snd_soc_codec_get_drvdata(codec);
+	struct nau8310 *nau8310 = snd_soc_component_get_drvdata(component);
+	struct snd_soc_dapm_context *dapm =
+			snd_soc_component_get_dapm(component);
 
-	nau8310->dapm = &codec->dapm;
+	nau8310->dapm = dapm;
 
 	return 0;
 }
 
-int nau8310_enable_dsp(struct snd_soc_codec *codec)
+int nau8310_enable_dsp(struct snd_soc_component *component)
 {
-	struct nau8310 *nau8310 = snd_soc_codec_get_drvdata(codec);
+	struct nau8310 *nau8310 = snd_soc_component_get_drvdata(component);
 	char widget_name[WIDGET_NAME_MAX_SIZE];
 	int ret;
 
 	/* Avoid multi-codecs with prefix naming caused dapm widget not be
 	 * enabled/disabled state normally.
 	 */
-	if (codec->name_prefix) {
+	if (component->name_prefix) {
 		snprintf(widget_name, WIDGET_NAME_MAX_SIZE,
-			 "%s Sense", codec->name_prefix);
+			 "%s Sense", component->name_prefix);
 		snd_soc_dapm_disable_pin(nau8310->dapm, widget_name);
 	} else
 		snd_soc_dapm_disable_pin(nau8310->dapm, "Sense");
 
 	/* For internal Ring OSC, the default fs apply to 48kHz */
 	nau8310->fs = 48000;
-	ret = nau8310_set_sysclk(codec, 0, 0,
+	ret = nau8310_set_sysclk(component, 0, 0,
 				 nau8310->fs * 256, SND_SOC_CLOCK_IN);
 	if (ret)
 		goto err;
@@ -1304,7 +1381,7 @@ int nau8310_enable_dsp(struct snd_soc_codec *codec)
 	regmap_update_bits(nau8310->regmap, NAU8310_R1A_DSP_CORE_CTRL2,
 			   NAU8310_DSP_RUNSTALL | NAU8310_DAC_SEL_DSP_OUT,
 			   NAU8310_DAC_SEL_DSP_OUT);
-	ret = nau8310_dsp_init(codec);
+	ret = nau8310_dsp_init(component);
 	if (ret)
 		goto err;
 	nau8310->dsp_enable = true;
@@ -1320,9 +1397,9 @@ err:
 }
 EXPORT_SYMBOL_GPL(nau8310_enable_dsp);
 
-static int __maybe_unused nau8310_suspend(struct snd_soc_codec *codec)
+static int __maybe_unused nau8310_suspend(struct snd_soc_component *component)
 {
-	struct nau8310 *nau8310 = snd_soc_codec_get_drvdata(codec);
+	struct nau8310 *nau8310 = snd_soc_component_get_drvdata(component);
 
 	if (nau8310->dsp_enable)
 		regmap_update_bits(nau8310->regmap, NAU8310_R04_ENA_CTRL,
@@ -1334,9 +1411,9 @@ static int __maybe_unused nau8310_suspend(struct snd_soc_codec *codec)
 	return 0;
 }
 
-static int __maybe_unused nau8310_resume(struct snd_soc_codec *codec)
+static int __maybe_unused nau8310_resume(struct snd_soc_component *component)
 {
-	struct nau8310 *nau8310 = snd_soc_codec_get_drvdata(codec);
+	struct nau8310 *nau8310 = snd_soc_component_get_drvdata(component);
 	int ret, value;
 
 	regcache_cache_only(nau8310->regmap, false);
@@ -1351,7 +1428,7 @@ static int __maybe_unused nau8310_resume(struct snd_soc_codec *codec)
 	if (nau8310->dsp_enable && (value & NAU8310_DAC_SEL_DSP_OUT)) {
 		/* For internal Ring OSC, the default fs apply to 48kHz */
 		nau8310->fs = 48000;
-		ret = nau8310_set_sysclk(codec, 0, 0,
+		ret = nau8310_set_sysclk(component, 0, 0,
 					 nau8310->fs * 256, SND_SOC_CLOCK_IN);
 		if (ret)
 			goto err;
@@ -1366,7 +1443,7 @@ static int __maybe_unused nau8310_resume(struct snd_soc_codec *codec)
 		msleep(120);
 		regmap_update_bits(nau8310->regmap, NAU8310_R1A_DSP_CORE_CTRL2,
 				   NAU8310_DSP_RUNSTALL, 0);
-		ret = nau8310_dsp_resume(codec);
+		ret = nau8310_dsp_resume(component);
 		if (ret) {
 			dev_err(nau8310->dev, "Failed to resume DSP: %d\n", ret);
 			goto err;
@@ -1382,7 +1459,7 @@ err:
 	return ret;
 }
 
-static const struct snd_soc_codec_driver soc_codec_dev_nau8310 = {
+static const struct snd_soc_component_driver soc_component_dev_nau8310 = {
 	.probe			= nau8310_codec_probe,
 	.set_sysclk		= nau8310_set_sysclk,
 	.suspend		= nau8310_suspend,
@@ -1393,6 +1470,10 @@ static const struct snd_soc_codec_driver soc_codec_dev_nau8310 = {
 	.num_dapm_widgets	= ARRAY_SIZE(nau8310_dapm_widgets),
 	.dapm_routes		= nau8310_dapm_routes,
 	.num_dapm_routes	= ARRAY_SIZE(nau8310_dapm_routes),
+	.idle_bias_on			= 1,
+	.use_pmdown_time		= 1,
+	.endianness			= 1,
+	.non_legacy_dai_naming		= 1,
 };
 
 static const struct snd_soc_dai_ops nau8310_dai_ops = {
@@ -1576,6 +1657,7 @@ static void nau8310_init_regs(struct nau8310 *nau8310)
 			   NAU8310_LIM_MDE_MASK | NAU8310_VBAT_THLD_MASK,
 			   (0x3 << NAU8310_LIM_MDE_SFT) |
 			   (0x18 << NAU8310_VBAT_THLD_SFT));
+
 	/* Enable ALC to avoid signal distortion when battery low. */
 	if (nau8310->alc_enable)
 		regmap_update_bits(regmap, NAU8310_R2E_ALC_CTRL3,
@@ -1726,56 +1808,56 @@ static int nau8310_read_device_properties(struct device *dev,
 {
 	int ret;
 
-	ret = of_property_read_u32(dev->of_node, "nuvoton,vref-impedance",
+	ret = device_property_read_u32(dev, "nuvoton,vref-impedance",
 				       &nau8310->vref_impedance);
 	if (ret)
 		nau8310->vref_impedance = 2;
-	ret = of_property_read_u32(dev->of_node, "nuvoton,dac-vref",
+	ret = device_property_read_u32(dev, "nuvoton,dac-vref",
 				       &nau8310->dac_vref);
 	if (ret)
 		nau8310->dac_vref = 1;
-	ret = of_property_read_u32(dev->of_node, "nuvoton,sar-voltage",
+	ret = device_property_read_u32(dev, "nuvoton,sar-voltage",
 				       &nau8310->sar_voltage);
 	if (ret)
 		nau8310->sar_voltage = 0;
-	ret = of_property_read_u32(dev->of_node, "nuvoton,sar-compare-time",
+	ret = device_property_read_u32(dev, "nuvoton,sar-compare-time",
 				       &nau8310->sar_compare_time);
 	if (ret)
 		nau8310->sar_compare_time = 1;
-	ret = of_property_read_u32(dev->of_node, "nuvoton,sar-sampling-time",
+	ret = device_property_read_u32(dev, "nuvoton,sar-sampling-time",
 				       &nau8310->sar_sampling_time);
 	if (ret)
 		nau8310->sar_sampling_time = 1;
 	nau8310->clock_detection =
-		!of_property_read_bool(dev->of_node, "nuvoton,clock-det-disable");
+		!device_property_read_bool(dev,	"nuvoton,clock-det-disable");
 	nau8310->clock_det_data =
-		of_property_read_bool(dev->of_node, "nuvoton,clock-det-data");
+		device_property_read_bool(dev, "nuvoton,clock-det-data");
 	nau8310->temp_compensation =
-		of_property_read_bool(dev->of_node, "nuvoton,temp-compensation");
+		device_property_read_bool(dev, "nuvoton,temp-compensation");
 	if (nau8310->silicon_id == NAU8310_REG_SI_REV_G10) {
-		ret = of_property_read_u32(dev->of_node, "nuvoton,boost-delay",
+		ret = device_property_read_u32(dev, "nuvoton,boost-delay",
 					       &nau8310->boost_delay);
 		if (ret)
 			nau8310->boost_delay = 0x8;
-		ret = of_property_read_u32(dev->of_node, "nuvoton,boost-convert-enable",
+		ret = device_property_read_u32(dev, "nuvoton,boost-convert-enable",
 					       &nau8310->boost_convert_enable);
 		if (ret)
 			nau8310->boost_convert_enable = 0x0;
-		ret = of_property_read_u32(dev->of_node, "nuvoton,boost-target-limit",
+		ret = device_property_read_u32(dev, "nuvoton,boost-target-limit",
 					       &nau8310->boost_target_limit);
 		if (ret)
 			nau8310->boost_target_limit = 0x32;
-		ret = of_property_read_u32(dev->of_node, "nuvoton,boost-target-margin",
+		ret = device_property_read_u32(dev, "nuvoton,boost-target-margin",
 					       &nau8310->boost_target_margin);
 		if (ret)
 			nau8310->boost_target_margin = 0x2;
 	}
 	nau8310->normal_iis_data =
-		of_property_read_bool(dev->of_node, "nuvoton,normal-iis-data");
+		device_property_read_bool(dev, "nuvoton,normal-iis-data");
 	nau8310->alc_enable =
-		of_property_read_bool(dev->of_node, "nuvoton,alc-enable");
+		device_property_read_bool(dev, "nuvoton,alc-enable");
 	nau8310->aec_enable =
-		of_property_read_bool(dev->of_node, "nuvoton,aec-enable");
+		device_property_read_bool(dev, "nuvoton,aec-enable");
 
 	return 0;
 }
@@ -1816,15 +1898,8 @@ static int nau8310_i2c_probe(struct i2c_client *i2c,
 	nau8310_print_device_properties(nau8310);
 	nau8310_init_regs(nau8310);
 
-	return snd_soc_register_codec(dev, &soc_codec_dev_nau8310,
+	return devm_snd_soc_register_component(dev, &soc_component_dev_nau8310,
 					  &nau8310_dai, 1);
-}
-
-
-static int nau8310_i2c_remove(struct i2c_client *client)
-{
-	snd_soc_unregister_codec(&client->dev);
-	return 0;
 }
 
 static const struct i2c_device_id nau8310_i2c_ids[] = {
@@ -1859,7 +1934,6 @@ static struct i2c_driver nau8310_i2c_driver = {
 		.acpi_match_table = ACPI_PTR(nau8310_acpi_match),
 	},
 	.probe = nau8310_i2c_probe,
-	.remove = nau8310_i2c_remove,
 	.id_table = nau8310_i2c_ids,
 };
 module_i2c_driver(nau8310_i2c_driver);
