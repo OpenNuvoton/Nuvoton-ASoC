@@ -1,15 +1,10 @@
-/*
- * The NAU83G10/20 DSP driver.
- *
- * Copyright 2021 Nuvoton Technology Corp.
- *
- * Author: John Hsu <kchsu0@nuvoton.com>
- *         David Lin <ctlin0@nuvoton.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
- */
+// SPDX-License-Identifier: GPL-2.0
+//
+// The NAU83G10 Boosted Mono Class-D Amplifier with DSP and I/V-sense driver.
+//
+// Copyright 2021 Nuvoton Technology Crop.
+// Author: John Hsu <kchsu0@nuvoton.com>
+//         David Lin <ctlin0@nuvoton.com>
 
 #include <linux/delay.h>
 #include <linux/firmware.h>

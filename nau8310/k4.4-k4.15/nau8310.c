@@ -1,15 +1,10 @@
-/*
- * The NAU83G10 Boosted Mono Class-D Amplifier with DSP and I/V-sense driver.
- *
- * Copyright 2021 Nuvoton Technology Corp.
- *
- * Author: John Hsu <kchsu0@nuvoton.com>
- *         David Lin <ctlin0@nuvoton.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
- */
+// SPDX-License-Identifier: GPL-2.0
+//
+// The NAU83G10 Boosted Mono Class-D Amplifier with DSP and I/V-sense driver.
+//
+// Copyright 2021 Nuvoton Technology Crop.
+// Author: John Hsu <kchsu0@nuvoton.com>
+//         David Lin <ctlin0@nuvoton.com>
 
 #include <linux/acpi.h>
 #include <linux/clk.h>
@@ -1050,6 +1045,25 @@ err:
 	return ret;
 }
 
+static int nau8310_trigger(struct snd_pcm_substream *substream,
+		int cmd, struct snd_soc_dai *dai)
+{
+	struct snd_soc_codec *codec = dai->codec;
+	struct nau8310 *nau8310 = snd_soc_codec_get_drvdata(codec);
+
+	switch (cmd) {
+	case SNDRV_PCM_TRIGGER_STOP:
+	case SNDRV_PCM_TRIGGER_SUSPEND:
+		/* Switch the clock source of DSP to OSC. */
+		regmap_update_bits(nau8310->regmap, NAU8310_R04_ENA_CTRL,
+				   NAU8310_DSP_SEL_OSC, NAU8310_DSP_SEL_OSC);
+		dev_dbg(nau8310->dev, "Switch the clock source of DSP to OSC");
+		break;
+	}
+
+	return 0;
+}
+
 static int nau8310_hw_params(struct snd_pcm_substream *substream,
 			     struct snd_pcm_hw_params *params, struct snd_soc_dai *dai)
 {
@@ -1341,25 +1355,6 @@ static int nau8310_codec_probe(struct snd_soc_codec *codec)
 
 	nau8310->dapm = dapm;
 
-	return 0;
-}
-
-int nau8310_enable_dsp(struct snd_soc_codec *codec)
-{
-	struct nau8310 *nau8310 = snd_soc_codec_get_drvdata(codec);
-	char widget_name[WIDGET_NAME_MAX_SIZE];
-	int ret;
-
-	/* Avoid multi-codecs with prefix naming caused dapm widget not be
-	 * enabled/disabled state normally.
-	 */
-	if (codec->component.name_prefix) {
-		snprintf(widget_name, WIDGET_NAME_MAX_SIZE,
-			 "%s Sense", codec->component.name_prefix);
-		snd_soc_dapm_disable_pin(nau8310->dapm, widget_name);
-	} else
-		snd_soc_dapm_disable_pin(nau8310->dapm, "Sense");
-
 	/* For internal Ring OSC, the default fs apply to 48kHz */
 	nau8310->fs = 48000;
 	ret = nau8310_set_sysclk(codec, 0, 0,
@@ -1380,6 +1375,30 @@ int nau8310_enable_dsp(struct snd_soc_codec *codec)
 	regmap_update_bits(nau8310->regmap, NAU8310_R1A_DSP_CORE_CTRL2,
 			   NAU8310_DSP_RUNSTALL | NAU8310_DAC_SEL_DSP_OUT,
 			   NAU8310_DAC_SEL_DSP_OUT);
+	/* Loading DSP firmware */
+	ret = nau8310_enable_dsp(codec);
+	if(ret)
+		dev_warn("Can't enable DSP, so enable bypass mode\n");
+
+	return 0;
+}
+
+int nau8310_enable_dsp(struct snd_soc_codec *codec)
+{
+	struct nau8310 *nau8310 = snd_soc_codec_get_drvdata(codec);
+	char widget_name[WIDGET_NAME_MAX_SIZE];
+	int ret;
+
+	/* Avoid multi-codecs with prefix naming caused dapm widget not be
+	 * enabled/disabled state normally.
+	 */
+	if (codec->component.name_prefix) {
+		snprintf(widget_name, WIDGET_NAME_MAX_SIZE,
+			 "%s Sense", codec->component.name_prefix);
+		snd_soc_dapm_disable_pin(nau8310->dapm, widget_name);
+	} else
+		snd_soc_dapm_disable_pin(nau8310->dapm, "Sense");
+
 	ret = nau8310_dsp_init(codec);
 	if (ret)
 		goto err;
@@ -1478,6 +1497,7 @@ static const struct snd_soc_codec_driver soc_codec_dev_nau8310 = {
 static const struct snd_soc_dai_ops nau8310_dai_ops = {
 	.startup	= nau8310_startup,
 	.hw_params	= nau8310_hw_params,
+	.trigger	= nau8310_trigger,
 	.shutdown	= nau8310_shutdown,
 	.set_fmt	= nau8310_set_fmt,
 	.set_tdm_slot	= nau8310_set_tdm_slot,
