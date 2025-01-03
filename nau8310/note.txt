@@ -1,0 +1,67 @@
+1.For nau8310 audio bring up, the key point is to modify machine driver.
+2.This is a sample code that is machine driver on RPI3 platfrom(pisound-nau8310.c)
+3.Generally, Nau8310 need external mclk for working. However, the DSP mode just support 48K,
+  so the external mclk is needed 12.288MHz.
+4.Regarding nau8310 is mono output, the audio system need to mount two components.
+  Therefore, machine driver need to add prefix naming for two components.
+  From pisound-nau8310.c, we can see sound card can add codec_conf. 
+  It is to associate with kcontrol,widget and path for codec device driver.
+  
+  static struct snd_soc_card snd_soc_pisound_nau8310 = {
+	.....
+	.codec_conf = nau8310_codec_conf,
+	.num_configs = ARRAY_SIZE(nau8310_codec_conf),
+
+};
+
+5.Meanwhile, machine driver can also add relative kcontrol, widget.
+  The purpose can make machine's widget connect to codec's widget.
+  Finally, user can use amixer to control specfied path, even manage by UCM within audio service(pulseaudio).
+  
+static const struct snd_kcontrol_new pisound_nau8310_controls[] = {
+	SOC_DAPM_PIN_SWITCH("Left Spk"),
+	SOC_DAPM_PIN_SWITCH("Right Spk"),
+};
+
+static const struct snd_soc_dapm_widget pisound_nau8310_dapm_widgets[] = {
+	SND_SOC_DAPM_SPK("Left Spk", NULL),
+	SND_SOC_DAPM_SPK("Right Spk", NULL),
+};
+
+static const struct snd_soc_dapm_route pisound_nau8310_audio_map[] = {
+	/* speaker */
+	{ "Left Spk", NULL, "Left Speaker" },
+	{ "Right Spk", NULL, "Right Speaker" },
+};
+
+6.In the other hands, we need to set format and clock settings for two components.
+  Therefore, we can see pisound_nau8310_hw_params need to set format and clock settings.
+  If the requirement is TDM mode, user can use snd_soc_dai_set_tdm_slot to assign ADC/DAC slot.
+  the clock setting is to use snd_soc_dai_set_sysclk.
+
+static int pisound_nau8310_hw_params(struct snd_pcm_substream *substream,
+                                     struct snd_pcm_hw_params *params)
+{
+	....
+	
+	for_each_rtd_codec_dais(rtd, i, codec_dai) {
+#ifdef RPI_TDM_I2S
+		if (!strcmp(codec_dai->component->name, COMPONENT_NAME_LEFT)) {
+			/* DEV0 tdm slot configuration */
+			snd_soc_dai_set_tdm_slot(codec_dai, 0x11, 0x1, 8, 16);
+		}
+		if (!strcmp(codec_dai->component->name, COMPONENT_NAME_RIGHT)) {
+			/* DEV1 tdm slot configuration */
+			snd_soc_dai_set_tdm_slot(codec_dai, 0x22, 0x2, 8, 16);
+		}
+#endif
+		/* Configure sysclk for codec */
+		ret = snd_soc_dai_set_sysclk(codec_dai, 0, dev_nau8310->mclk_rate, SND_SOC_CLOCK_IN);
+		if (ret < 0) {
+			dev_err(rtd->dev, "failed to set sysclk\n");
+			return ret;
+		}
+	}
+
+	return ret;
+}
