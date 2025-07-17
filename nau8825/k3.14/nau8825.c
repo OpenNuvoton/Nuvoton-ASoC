@@ -2217,8 +2217,14 @@ static void nau8825_init_regs(struct nau8825 *nau8825)
 	regmap_update_bits(nau8825->regmap, NAU8825_REG_BIAS_ADJ,
 		NAU8825_BIAS_TESTDAC_EN, NAU8825_BIAS_TESTDAC_EN);
 	/* CICCLP off */
-	regmap_update_bits(regmap, NAU8825_REG_DAC_CTRL1,
-		NAU8825_DAC_CLIP_OFF, NAU8825_DAC_CLIP_OFF);
+	if (nau8825->sw_id == NAU8825_SOFTWARE_ID_NAU8825) {
+		regmap_update_bits(regmap, NAU8825_REG_DAC_CTRL1,
+			NAU8825_DAC_CLIP_OFF, NAU8825_DAC_CLIP_OFF);
+	}
+	else {
+		regmap_update_bits(regmap, NAU8825_REG_DAC_CTRL1,
+			NAU8825_DAC_CLIP_OFF, 0);
+	}
 
 	/* Class AB bias current to 2x, DAC Capacitor enable MSB/LSB */
 	regmap_update_bits(regmap, NAU8825_REG_ANALOG_CONTROL_2,
