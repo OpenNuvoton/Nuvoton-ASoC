@@ -827,6 +827,11 @@ static int nau8325_i2c_probe(struct i2c_client *i2c)
 	}
 	nau8325_init_regs(nau8325);
 
+	if (!strcmp(i2c->name, NAU8225_DEV_NAME)) {
+		const char *dai_name = NAU8225_CODEC_DAI;
+		nau8325_dai.name = dai_name;
+	}
+
 	ret = devm_snd_soc_register_component(dev,
 		&nau8325_component_driver, &nau8325_dai, 1);
 
@@ -834,7 +839,8 @@ static int nau8325_i2c_probe(struct i2c_client *i2c)
 }
 
 static const struct i2c_device_id nau8325_i2c_ids[] = {
-	{ "nau8325", 0 },
+	{ NAU8325_DEV_NAME, 0 },
+	{ NAU8225_DEV_NAME, 0 },
 	{ }
 };
 MODULE_DEVICE_TABLE(i2c, nau8325_i2c_ids);
@@ -842,6 +848,7 @@ MODULE_DEVICE_TABLE(i2c, nau8325_i2c_ids);
 #ifdef CONFIG_OF
 static const struct of_device_id nau8325_of_ids[] = {
 	{ .compatible = "nuvoton,nau8325", },
+	{ .compatible = "nuvoton,nau8225", },
 	{}
 };
 MODULE_DEVICE_TABLE(of, nau8325_of_ids);

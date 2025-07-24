@@ -347,7 +347,10 @@
 #define NAU8325_CLK_DAC_DELAY_EN	(0x7 << NAU8325_CLK_DAC_DELAY_SFT)
 
 #define NAU8325_CODEC_DAI "nau8325-hifi"
+#define NAU8325_DEV_NAME "nau8325"
 
+#define NAU8225_CODEC_DAI "nau8225-hifi"
+#define NAU8225_DEV_NAME "nau8225"
 
 struct nau8325 {
 	struct device *dev;

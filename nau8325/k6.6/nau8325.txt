@@ -1,10 +1,10 @@
-The Nuvoton NAU8325 Stereo Class-D Audio Amplifier .
+The Nuvoton NAU8225/NAU8325 Stereo Class-D Audio Amplifier .
 
 This device supports I2C only.
 
 Required properties:
 
-  - compatible: "nuvoton,nau8325"
+  - compatible: One of "nuvoton,nau8325" or "nuvoton,nau8225"
   - reg: the I2C address of the device. This is 0x21.
 
 Optional properties:
