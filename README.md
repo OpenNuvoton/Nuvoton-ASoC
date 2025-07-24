@@ -4,10 +4,10 @@ Nuvoton codec and amp drivers with different ASoC versions.
 The Nuvoton-ASoC repository stores the Linux driver for codec and amplifier manufactured by Nuvoton. In each chip folder, you can find drivers for different Linux versions. We will update these drivers when new patches are approved by the Kernel community.
 
 x:none , o:ok (sync newest version)
-|Kernel                        |k3.14  |k3.18  |k3.19  |k4.4-15|k4.18  |k4.19  |k5.10  |k5.19  |k6.1   |k6.6   |note            |
+|Kernel                        |k3.14  |k3.18  |k3.19  |k4.4-15|k4.18  |k4.19  |k5.4-10|k5.19  |k6.1   |k6.6   |note            |
 |------------------------------|-------|-------|-------|-------|-------|-------|-------|-------|-------|-------|----------------|
 |NAU8315/NAU8318               |o      |o      |o      |o      |o      |o      |o      |o      |x      |x      |upstream at 5.11|
-|NAU8325                       |x      |x      |x      |x      |x      |x      |x      |x      |x      |o      |un-upstream     |
+|NAU8325                       |x      |x      |x      |x      |x      |x      |o      |x      |x      |o      |un-upstream     |
 |NAU8421                       |x      |x      |x      |x      |x      |x      |x      |x      |o      |x      |un-upstream     |
 |NAU85L40                      |o      |o      |o      |o      |o      |o      |o      |o      |x      |x      |upstream at 4.11|
 |NAU88C10/NAU88C12/NAU88C14    |o      |o      |o      |o      |o      |o      |o      |o      |x      |x      |upstream at 4.9 |
