@@ -1,0 +1,39 @@
+The Nuvoton NAU8225/NAU8325 Stereo Class-D Audio Amplifier .
+
+This device supports I2C only.
+
+Required properties:
+
+  - compatible: One of "nuvoton,nau8325" or "nuvoton,nau8225"
+  - reg: the I2C address of the device. This is 0x21.
+
+Optional properties:
+
+  - nuvoton,vref-impedance: VREF impedance selection.
+        0 - Open (default)
+        1 - 25 kOhm
+        2 - 125 kOhm
+        3 - 2.5 kOhm
+
+  - nuvoton,normal-iis-data: I2S data mode.
+        If set then the I2S Interface ADC path will transmit normal audio data.
+        Otherwise the I2S audio interface contains both audio data and SAR ADC data.
+
+  - nuvoton,alc-enable: Enable digital automatic level control (ALC) function.
+
+  - nuvoton,clock-detection-disable: Disable clock detection circuit that can controls the audio paths on and off.
+        If set then clock detection disabled, otherwise clock detection circuit enables.
+
+  - nuvoton,clock-det-data: Request clock detection to require 2048 non-zero samples before enabling the audio paths.
+        If set then non-zero samples is required, otherwise it doesn't matter.
+
+Example:
+
+  nau8325@21 {
+      compatible = "nuvoton,nau8325";
+      reg = <0x21>;
+      nuvoton,vref-impedance = <2>;
+      nuvoton,dac-vref = <1>;
+      nuvoton,alc-enable;
+      nuvoton,clock-det-data;
+  };
