@@ -141,7 +141,7 @@ static const struct soc_enum nau83110_dac_osr_enum =
 	SOC_ENUM_SINGLE(NAU83110_R76_DAC_CTRL1, 0,
 		ARRAY_SIZE(nau83110_osr_list), nau83110_osr_list);
 
-static const char * const nau83110_tdm_slot[] = { "", "", "", "Slot 0", "Slot 1",
+static const char *const nau83110_tdm_slot[] = { "", "", "", "Slot 0", "Slot 1",
 	"Slot 2", "Slot 3", "Slot 4", "Slot 5", "Slot 6", "Slot 7", "Slot 0 + 1",
 	"Slot 4 + 5" };
 
@@ -172,13 +172,13 @@ timeout:
 	return -ETIMEDOUT;
 }
 
-static int wait_mute_done(struct regmap *regmap)
+static inline int wait_mute_done(struct regmap *regmap)
 {
 	return nau83110_wait_for_bit(regmap, NAU83110_R1B_INTR_CTRL4,
 		BIT(1), 20, 2000);
 }
 
-static int wait_diag_done(struct regmap *regmap)
+static inline int wait_diag_done(struct regmap *regmap)
 {
 	return nau83110_wait_for_bit(regmap, NAU83110_R19_INTR_CTRL3,
 		BIT(2), 20, 20000);
@@ -512,7 +512,7 @@ static struct snd_soc_dai_driver nau83110_dai = {
 	.playback = {
 		.stream_name = "Playback",
 		.channels_min = 1,
-		.channels_max = 2,
+		.channels_max = 2,   /* Only 1 channel of data */
 		.rates = NAU83110_RATES,
 		.formats = NAU83110_FORMATS,
 	},
@@ -697,13 +697,13 @@ static int nau83110_setup_irq(struct nau83110 *nau83110)
 }
 #endif
 
-static void nau83110_software_reset(struct regmap *regmap)
+static inline void nau83110_software_reset(struct regmap *regmap)
 {
 	regmap_write(regmap, NAU83110_R00_SW_RST_EN, 0x5a5a);
 	regmap_write(regmap, NAU83110_R00_SW_RST_EN, 0xa5a5);
 }
 
-static void nau83110_audio_reset(struct regmap *regmap)
+static inline void nau83110_audio_reset(struct regmap *regmap)
 {
 	regmap_write(regmap, NAU83110_R01_AUDIO_RST_EN, 0x5a5a);
 	regmap_write(regmap, NAU83110_R01_AUDIO_RST_EN, 0xa5a5);

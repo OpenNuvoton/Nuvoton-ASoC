@@ -20,7 +20,7 @@ Optional properties:
       triggers the corresponding interrupt handler in the driver.
 
   - nuvoton,enable-gpios : GPIO specifier for the chip's Device Enable (EN) pin.
-      If this option is not specified then driver does not manage
+      If this option is not specified, then driver does not manage
       the pin state (e.g. chip is always on).
 
 Example:
