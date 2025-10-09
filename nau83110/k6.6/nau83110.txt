@@ -1,0 +1,33 @@
+The NAU83110 ALSA SoC audio driver.
+The codec is a mono high efficiency filter-free Class-D audio amplifier,
+which is capable of driving a 4Ω load with up to 20.8W output power at 12.6V supply.
+
+This device supports I2C only.
+
+Required properties:
+  - compatible: "nuvoton,nau83110"
+
+  - reg: the I2C address of the device.
+      0x2A (addr1=0 && addr0=0)
+      0x2B (addr1=0 && addr0=1)
+      0x5A (addr1=1 && addr0=0)
+      0x5B (addr1=1 && addr0=1)
+
+Optional properties:
+  - interrupts : Interrupt specifier for the chip's IRQ pin.
+      IRQ_TYPE_LEVEL_HIGH: The interrupt is level-triggered and The active voltage level is high.
+      If this option is specified, the interrupt controller detects this high-level signal on the IRQ number and
+      triggers the corresponding interrupt handler in the driver.
+
+  - nuvoton,enable-gpios : GPIO specifier for the chip's Device Enable (EN) pin.
+      If this option is not specified then driver does not manage
+      the pin state (e.g. chip is always on).
+
+Example:
+
+  nau83110@5B {
+      compatible = "nuvoton,nau83110";
+      reg = <0x5B>;
+      interrupts = <23 IRQ_TYPE_LEVEL_HIGH>;
+      nuvoton,enable-gpios = <&gpio 24 GPIO_ACTIVE_HIGH>;
+  };
