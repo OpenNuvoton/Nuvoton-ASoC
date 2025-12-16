@@ -1,0 +1,58 @@
+// Definitions for audioinjector.net audio add on soundcard
+/dts-v1/;
+/plugin/;
+
+#include <dt-bindings/clock/bcm2835.h>
+
+/ {
+	compatible = "brcm,bcm2835";
+
+	fragment@0 {
+		target = <&i2s>;
+		__overlay__ {
+			status = "okay";
+		};
+	};
+
+	fragment@1 {
+		target = <&i2c1>;
+		__overlay__ {
+			#address-cells = <1>;
+			#size-cells = <0>;
+			status = "okay";
+
+			nau8810@1a {
+				#sound-dai-cells = <0>;
+				compatible = "nuvoton,nau8810";
+				reg = <0x1a>;
+				status = "okay";
+			};
+		};
+	};
+
+	fragment@2 {
+		target = <&sound>;
+		__overlay__ {
+			compatible = "nuvoton,pisound-nau8810";
+			i2s-controller = <&i2s>;
+			clocks = <&clocks BCM2835_CLOCK_GP0>;
+			clock-names = "mclk_gp0";
+			nuvoton,clock-rates = <12288000>;
+			//nuvoton,pll-enable;
+			status = "okay";
+		};
+	};
+
+	fragment@3 {
+		target = <&gpio>;
+		__overlay__ {
+			pinctrl-names = "default";
+			pinctrl-0 = <&pisound_mclk_pins>;
+
+			pisound_mclk_pins: pisound_mclk_pins {
+				brcm,pins = <4 5 6>; /* GPIO4-6 */
+				brcm,function = <4>; /* alt0:GPCLK0 */
+			};
+		};
+	};
+};
