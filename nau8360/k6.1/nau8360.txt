@@ -1,0 +1,44 @@
+The Nuvoton NAU83G60 Stereo Class-D Amplifier with DSP and I/V-sense driver.
+
+This device supports I2C only.
+
+Required properties:
+  - compatible: "nuvoton,nau8360"
+
+  - reg: the I2C address of the device.
+      0x1A (GPIO2=0 && GPIO1=0)
+      0x1B (GPIO2=0 && GPIO1=1)
+      0x4A (GPIO2=1 && GPIO1=0)
+      0x4B (GPIO2=1 && GPIO1=1)
+
+Optional properties:
+  - nuvoton,dsp-bypass: Forcely disable/bypass DSP path.
+
+  - nuvoton,low-latency: Enable low latency mode.
+      Please note the feature helps sensing performance but worses power comsuption.
+
+  - nuvoton,anc-enable: Enable ANC feature.
+      NAU83G60 provides configurable low latency ANC path to Advanced DSP through TDM-RX.
+      To reduce latency, the ANC path only supports 48KHz sample rates.
+
+  - nuvoton,aec-enable: Enable AEC feature.
+      NAU83G60 provides Advanced DSP processed audio data as AEC reference through TDM-TX.
+      The AEC path only supports 48KHz sample rates.
+
+  - nuvoton,power-supply: number from 8 to 24 that specify the voltage of the extneral power source.
+      The NAU83G60 needs two external power source to operate. The VBAT is designed to connect with the external
+      power supply or battery cells which the voltage range is 8V ~ 24V as the analog domain power source.
+
+  - nuvoton,tdm-channel-length: Assign TDM channel length. The length must be 16, 24, or 32.
+
+  - nuvoton,dsp-fw-names: Assign firmware for left and right DSP core.
+
+Example:
+
+  nau8360@1a {
+      compatible = "nuvoton,nau8360";
+      reg = <0x1a>;
+      nuvoton,aec-enable;
+      nuvoton,power-supply = <12>;
+      nuvoton,dsp-fw-names = "NAU83G60.kcs.bin.l" , "NAU83G60.kcs.bin.r";
+  };
