@@ -1,0 +1,15 @@
+NAU8810 audio CODEC
+
+Required properties:
+
+  - compatible : (required) "nuvoton,nau8810"
+  - reg : (required) chip select address of device.
+  - spi-max-frequency : (required) Maximum SPI clocking speed of device in Hz
+
+Example:
+
+codec: nau8810@0 {
+	compatible = "nuvoton,nau8810";
+	spi-max-frequency = <400000>;
+	reg = <0>;
+};

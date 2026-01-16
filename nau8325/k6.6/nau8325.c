@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
  * nau8325.c -- Nuvoton NAU8325 audio codec driver
- *
+ * 
  * Copyright 2023 Nuvoton Technology Crop.
  * Author: Seven Lee <WTLI@nuvoton.com>
  *         David Lin <CTLIN0@nuvoton.com>
@@ -797,8 +797,7 @@ static int nau8325_read_device_properties(struct device *dev,
 	return 0;
 }
 
-static int nau8325_i2c_probe(struct i2c_client *i2c,
-                            const struct i2c_device_id *id)
+static int nau8325_i2c_probe(struct i2c_client *i2c)
 {
 	struct device *dev = &i2c->dev;
 	struct nau8325 *nau8325 = dev_get_platdata(dev);
