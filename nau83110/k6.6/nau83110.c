@@ -7,7 +7,6 @@
  * Copyright (C) 2025 Nuvoton Technology Corp.
  * Author: Neo Chang <ylchang2@nuvoton.com>
  */
-
 #include <linux/module.h>
 #include <linux/kernel.h>
 #include <linux/init.h>
@@ -24,9 +23,7 @@
 
 #include "nau83110.h"
 
-/* Range of Master Clock MCLK (Hz) */
-#define MASTER_CLK_MAX 38400000
-#define MASTER_CLK_MIN 256000
+#define DELAY_WORK_5S 5000
 
 static const struct reg_default nau83110_reg_defaults[] = {
 	{ NAU83110_R00_SW_RST_EN, 0x0000 },
@@ -184,30 +181,47 @@ static inline int wait_diag_done(struct regmap *regmap)
 		BIT(2), 20, 20000);
 }
 
+static inline void nau83110_prot_int_enable(struct regmap *regmap, bool enable)
+{
+	regmap_update_bits(regmap, NAU83110_R17_INTR_CTRL1,
+		NAU83110_INT_PROT_EN, enable ? NAU83110_INT_PROT_EN : 0);
+}
+
+static inline void nau83110_hv_driver_enable(struct regmap *regmap, bool enable)
+{
+	regmap_update_bits(regmap, NAU83110_RBD_PWRSTAGE_CTRL2,
+		NAU83110_HVDRIVER_CTRL2, enable ? NAU83110_HVDRIVER_CTRL2 : 0);
+}
+
+static inline void nau83110_mute_enable(struct regmap *regmap, bool enable)
+{
+	regmap_update_bits(regmap, NAU83110_R7A_MUTE_CTRL,
+		NAU83110_SOFT_MUTE, enable ? NAU83110_SOFT_MUTE : 0);
+}
+
+static inline void nau83110_osc_enable(struct regmap *regmap, bool enable)
+{
+	regmap_update_bits(regmap, NAU83110_RA8_STANDBY_CTRL,
+		NAU83110_STANDBY_CTRL_MASK, enable ? NAU83110_STANDBY_CTRL : 0);
+}
+
 static int load_diagnostic(struct regmap *regmap)
 {
 	int bclk_status = 0;
 
-	regmap_update_bits(regmap, NAU83110_R7A_MUTE_CTRL,
-		NAU83110_SOFT_MUTE, NAU83110_SOFT_MUTE);
-	if (wait_mute_done(regmap))
-		goto timeout;
-
-	/* Set HV(PWM) off */
-	regmap_update_bits(regmap, NAU83110_RBD_PWRSTAGE_CTRL2,
-		NAU83110_PWRSTAGE_CTRL2, 0);
 	regmap_write(regmap, NAU83110_RBB_PWRSTAGE_CTRL0, 0xb90b);
 	regmap_write(regmap, NAU83110_RBC_PWRSTAGE_CTRL1, 0x3818);
 
 	/* OSC48M Enable */
-	regmap_update_bits(regmap, NAU83110_RA8_STANDBY_CTRL,
-		NAU83110_STANDBY_CTRL_MASK, NAU83110_STANDBY_CTRL);
+	nau83110_osc_enable(regmap, true);
 	/* Check BCLK status */
 	regmap_read(regmap, NAU83110_R1B_INTR_CTRL4, &bclk_status);
-	if (bclk_status & BIT(15))
+	if (bclk_status & NAU83110_BCLK_NO_BCLK)
 		msleep(100);
 
-	regmap_write(regmap, NAU83110_R19_INTR_CTRL3, 0xffff);
+	/* Diagnostic interrupt clear */
+	regmap_write(regmap, NAU83110_R19_INTR_CTRL3,
+		NAU83110_INT_DIAG | NAU83110_INT_DIANDONE);
 	/* Trigger Load Diagnostic*/
 	regmap_update_bits(regmap, NAU83110_R6D_DIAG_CTRL0, NAU83110_DIAG_EN,
 		NAU83110_DIAG_EN);
@@ -216,19 +230,15 @@ static int load_diagnostic(struct regmap *regmap)
 
 	regmap_update_bits(regmap, NAU83110_R6D_DIAG_CTRL0, NAU83110_DIAG_EN, 0);
 	/* OSC48M Disable */
-	regmap_update_bits(regmap, NAU83110_RA8_STANDBY_CTRL,
-		NAU83110_STANDBY_CTRL_MASK, 0);
+	nau83110_osc_enable(regmap, false);
+
 	regmap_write(regmap, NAU83110_RBB_PWRSTAGE_CTRL0, 0x810b);
 	regmap_write(regmap, NAU83110_RBC_PWRSTAGE_CTRL1, 0x0008);
-	/* Set HV(PWM) on */
-	regmap_update_bits(regmap, NAU83110_RBD_PWRSTAGE_CTRL2,
-		NAU83110_PWRSTAGE_CTRL2, NAU83110_PWRSTAGE_CTRL2);
-	regmap_update_bits(regmap, NAU83110_R7A_MUTE_CTRL, NAU83110_SOFT_MUTE, 0);
 
 	return 0;
 
 timeout:
-	return -EINVAL;
+	return -ETIMEDOUT;
 }
 
 static int nau83110_diag_get(struct snd_kcontrol *kcontrol,
@@ -249,7 +259,25 @@ static int nau83110_diag_put(struct snd_kcontrol *kcontrol,
 	if (!ucontrol->value.integer.value[0])
 		return 0;
 
+	mutex_lock(&nau83110->lock);
+
+	nau83110_mute_enable(nau83110->regmap, true);
+	if (wait_mute_done(nau83110->regmap)) {
+		ret = -ETIMEDOUT;
+		goto work_err;
+	}
+
+	nau83110_hv_driver_enable(nau83110->regmap, false);
+
 	ret = load_diagnostic(nau83110->regmap);
+	if (ret)
+		goto work_err;
+
+	nau83110_hv_driver_enable(nau83110->regmap, true);
+	nau83110_mute_enable(nau83110->regmap, false);
+
+work_err:
+	mutex_unlock(&nau83110->lock);
 	dev_info(nau83110->dev, "load diagnostic %s", ret ? "fail" : "success");
 
 	return ret;
@@ -305,7 +333,55 @@ static const struct snd_soc_dapm_route nau83110_dapm_routes[] = {
 	{"SPKN", NULL, "Playback"},
 };
 
-#ifdef ENABLE_ISR
+static void nau83110_diag_work(struct work_struct *work)
+{
+	struct delayed_work *dwork = to_delayed_work(work);
+	struct nau83110 *nau83110 = container_of(dwork, struct nau83110, diag_work);
+	struct regmap *regmap = nau83110->regmap;
+	int active_int;
+	int ret;
+
+	mutex_lock(&nau83110->lock);
+	nau83110->diag_status = DIAG_FAIL;
+
+	nau83110_mute_enable(regmap, true);
+	if (wait_mute_done(regmap))
+		goto work_err;
+
+	nau83110_hv_driver_enable(regmap, false);
+	nau83110_prot_int_enable(regmap, false);
+
+	ret = load_diagnostic(regmap);
+	if (ret)
+		goto work_err;
+
+	ret = regmap_read(regmap, NAU83110_R19_INTR_CTRL3, &active_int);
+	if (ret || (active_int & NAU83110_INT_DIAG)) {
+		dev_err(nau83110->dev, "load diag flag:%x", active_int);
+		goto work_err;
+	}
+
+	nau83110_hv_driver_enable(regmap, true);
+	nau83110_mute_enable(regmap, false);
+	nau83110_prot_int_enable(regmap, true);
+
+	nau83110->diag_status = DIAG_SUCCESS;
+	dev_info(nau83110->dev, "load diagnostic successful");
+
+	mutex_unlock(&nau83110->lock);
+	return;
+
+work_err:
+	mutex_unlock(&nau83110->lock);
+	queue_delayed_work(nau83110->wq,
+		&nau83110->diag_work, msecs_to_jiffies(nau83110->delayed_time));
+}
+
+static void protect_work_start(struct nau83110 *nau83110)
+{
+	queue_delayed_work(nau83110->wq, &nau83110->diag_work, msecs_to_jiffies(0));
+}
+
 static void nau83110_trigger_work(struct work_struct *work)
 {
 	struct nau83110 *nau83110 = container_of(work, struct nau83110, trigger_work);
@@ -317,13 +393,21 @@ static void nau83110_trigger_work(struct work_struct *work)
 		regmap_update_bits(nau83110->regmap, NAU83110_R18_INTR_CTRL2,
 			NAU83110_COMMON_INT_MASK, 0);
 		regmap_write(nau83110->regmap, NAU83110_R19_INTR_CTRL3, 0xffff);
-		enable_irq(nau83110->irq);
+
+		if (!nau83110->irq_enabled) {
+			enable_irq(nau83110->irq);
+			nau83110->irq_enabled = true;
+		}
 		break;
 
 	case SNDRV_PCM_TRIGGER_STOP:
 	case SNDRV_PCM_TRIGGER_SUSPEND:
 	case SNDRV_PCM_TRIGGER_PAUSE_PUSH:
-		disable_irq(nau83110->irq);
+		if (nau83110->irq_enabled) {
+			disable_irq(nau83110->irq);
+			nau83110->irq_enabled = false;
+		}
+
 		regmap_write(nau83110->regmap, NAU83110_R18_INTR_CTRL2, 0xffff);
 		regmap_write(nau83110->regmap, NAU83110_R19_INTR_CTRL3, 0xffff);
 		break;
@@ -341,7 +425,25 @@ static int nau83110_trigger(struct snd_pcm_substream *substream,
 
 	return 0;
 }
-#endif
+
+static int nau83110_startup(struct snd_pcm_substream *substream,
+		struct snd_soc_dai *dai)
+{
+	struct snd_soc_component *component = dai->component;
+	struct nau83110 *nau83110 = snd_soc_component_get_drvdata(component);
+	int status;
+
+	mutex_lock(&nau83110->lock);
+	status = nau83110->diag_status;
+	mutex_unlock(&nau83110->lock);
+
+	if (status == DIAG_FAIL) {
+		dev_err(nau83110->dev, "Startup failed: diagnostic mode active");
+		return -EBUSY;
+	}
+
+	return 0;
+}
 
 static int nau83110_hw_params(struct snd_pcm_substream *substream,
 	struct snd_pcm_hw_params *params, struct snd_soc_dai *dai)
@@ -377,7 +479,6 @@ err:
 static int nau83110_mute(struct snd_soc_dai *dai, int mute, int direction)
 {
 	struct snd_soc_component *component = dai->component;
-
 	return snd_soc_component_update_bits(component, NAU83110_R7A_MUTE_CTRL,
 		NAU83110_SOFT_MUTE, mute ? NAU83110_SOFT_MUTE : 0);
 }
@@ -493,9 +594,8 @@ err:
 }
 
 static const struct snd_soc_dai_ops nau83110_ops = {
-#ifdef ENABLE_ISR
 	.trigger = nau83110_trigger,
-#endif
+	.startup = nau83110_startup,
 	.hw_params = nau83110_hw_params,
 	.mute_stream = nau83110_mute,
 	.set_fmt = nau83110_set_dai_fmt,
@@ -584,21 +684,17 @@ static int nau83110_init_regs(struct regmap *regmap)
 	regmap_write(regmap, NAU83110_RB6_ANALOG_CTRL0, 0x3e8f);
 	regmap_write(regmap, NAU83110_RB7_ANALOG_CTRL1, 0x0000);
 
-	/* Load Diagnostic Rework */
-	regmap_update_bits(regmap, NAU83110_R7A_MUTE_CTRL, NAU83110_SOFT_MUTE,
-		NAU83110_SOFT_MUTE);
+	nau83110_mute_enable(regmap, true);
 	if (wait_mute_done(regmap))
 		goto timeout;
 
 	/* OSC48M Enable */
-	regmap_update_bits(regmap, NAU83110_RA8_STANDBY_CTRL, NAU83110_STANDBY_CTRL_MASK,
-		NAU83110_STANDBY_CTRL);
-	/* EN ATTU*/
+	nau83110_osc_enable(regmap, true);
+	/* EN ATTU */
 	regmap_update_bits(regmap, NAU83110_R59_ALC_MODE_CTRL, NAU83110_ENAUTOATT,
 		NAU83110_ENAUTOATT);
-	/* Set HV(PWM) off */
-	regmap_update_bits(regmap, NAU83110_RBD_PWRSTAGE_CTRL2,
-		NAU83110_PWRSTAGE_CTRL2, 0);
+
+	nau83110_hv_driver_enable(regmap, false);
 	regmap_write(regmap, NAU83110_RBB_PWRSTAGE_CTRL0, 0xb90b);
 	regmap_write(regmap, NAU83110_RBC_PWRSTAGE_CTRL1, 0x3818);
 	/* Read Efuse */
@@ -606,75 +702,85 @@ static int nau83110_init_regs(struct regmap *regmap)
 		NAU83110_EFUASE_READ);
 	msleep(300);
 	/* OSC48M Disable */
-	regmap_update_bits(regmap, NAU83110_RA8_STANDBY_CTRL, NAU83110_STANDBY_CTRL_MASK,
-		0);
+	nau83110_osc_enable(regmap, false);
 	regmap_write(regmap, NAU83110_RBB_PWRSTAGE_CTRL0, 0x810b);
 	regmap_write(regmap, NAU83110_RBC_PWRSTAGE_CTRL1, 0x0008);
-	/* Set HV(PWM) on */
-	regmap_update_bits(regmap, NAU83110_RBD_PWRSTAGE_CTRL2, NAU83110_PWRSTAGE_CTRL2,
-		NAU83110_PWRSTAGE_CTRL2);
-	regmap_update_bits(regmap, NAU83110_R7A_MUTE_CTRL, NAU83110_SOFT_MUTE, 0);
+	/* Disble SCP debounce clock */
+	regmap_update_bits(regmap, NAU83110_RBD_PWRSTAGE_CTRL2, NAU83110_DEBONS_MASK, 0);
+	/* Set gain 9dB / VDDSPK 12.8V / Temperature threshold */
+	regmap_write(regmap, NAU83110_RB6_ANALOG_CTRL0, 0x3c8f);
+
+	nau83110_hv_driver_enable(regmap, true);
+	nau83110_mute_enable(regmap, false);
 	/* TDM RX Control */
 	regmap_write(regmap, NAU83110_R7C_TDM_RX_CTRL0, 0x000a);
 	regmap_write(regmap, NAU83110_R7D_TDM_RX_CTRL1, 0x0000);
 	/* TDM TX Control */
 	regmap_write(regmap, NAU83110_R80_TDM_TX_CTRL0, 0x0005);
 	regmap_write(regmap, NAU83110_R81_TDM_TX_CTRL1, 0x1801);
-	/* Disable Interrupt */
-	regmap_update_bits(regmap, NAU83110_R18_INTR_CTRL2, NAU83110_COMMON_INT_MASK, 0);
 
 	return 0;
 
 timeout:
-	return -EINVAL;
+	return -ETIMEDOUT;
 }
 
-#ifdef ENABLE_ISR
 static irqreturn_t nau83110_interrupt(int irq, void *data)
 {
 	struct nau83110 *nau83110 = (struct nau83110 *)data;
 	struct regmap *regmap = nau83110->regmap;
-	int active_int, clear_int = 0;	
+	int active_int, clear_int = 0;
+	bool spk_short = false;
 
 	if (regmap_read(regmap, NAU83110_R19_INTR_CTRL3, &active_int))
 		return IRQ_NONE;
 
+	if (active_int == 0)
+		return IRQ_NONE;
+
 	if (active_int & NAU83110_INT_BCLKDETB) {
-		dev_dbg(nau83110->dev, "BCLKDET occur");
+		dev_dbg_ratelimited(nau83110->dev, "BCLKDET occur");
 		clear_int |= NAU83110_INT_BCLKDETB;
 	}
 
 	if (active_int & NAU83110_INT_TALARM) {
-		dev_dbg(nau83110->dev, "TALARM occur");
+		dev_dbg_ratelimited(nau83110->dev, "TALARM occur");
 		clear_int |= NAU83110_INT_TALARM;
+		spk_short = true;
 	}
 
 	if (active_int & NAU83110_INT_OWT2) {
-		dev_dbg(nau83110->dev, "OWT2 occur");
+		dev_dbg_ratelimited(nau83110->dev, "OWT2 occur");
 		clear_int |= NAU83110_INT_OWT2;
+		spk_short = true;
 	}
 
 	if (active_int & NAU83110_INT_OWT1) {
-		dev_dbg(nau83110->dev, "OWT1 occur");
+		dev_dbg_ratelimited(nau83110->dev, "OWT1 occur");
 		clear_int |= NAU83110_INT_OWT1;
+		spk_short = true;
 	}
 
 	if (active_int & NAU83110_INT_SCP) {
-		dev_dbg(nau83110->dev, "SCP occur");
+		dev_dbg_ratelimited(nau83110->dev, "SCP occur");
 		clear_int |= NAU83110_INT_SCP;
+		spk_short = true;
 	}
 
 	if (active_int & NAU83110_INT_UVLOP) {
-		dev_dbg(nau83110->dev, "UVLOP occur");
+		dev_dbg_ratelimited(nau83110->dev, "UVLOP occur");
 		clear_int |= NAU83110_INT_UVLOP;
 	}
 
 	if (active_int & NAU83110_INT_OVLOB) {
-		dev_dbg(nau83110->dev, "OVLOB occur");
+		dev_dbg_ratelimited(nau83110->dev, "OVLOB occur");
 		clear_int |= NAU83110_INT_OVLOB;
 	}
 
 	regmap_write(regmap, NAU83110_R19_INTR_CTRL3, clear_int);
+
+	if (spk_short)
+		protect_work_start(nau83110);
 
 	return IRQ_HANDLED;
 }
@@ -695,7 +801,6 @@ static int nau83110_setup_irq(struct nau83110 *nau83110)
 
 	return 0;
 }
-#endif
 
 static inline void nau83110_software_reset(struct regmap *regmap)
 {
@@ -720,20 +825,38 @@ static int nau83110_i2c_probe(struct i2c_client *i2c)
 		if (!nau83110)
 			return -ENOMEM;
 	}
+	i2c_set_clientdata(i2c, nau83110);
+
+	nau83110->wq = alloc_workqueue("nau83110_wq", WQ_UNBOUND, 0);
+	if (!nau83110->wq)
+		return -ENOMEM;
+
+	ret = device_property_read_u32(dev, "nuvoton,wq-delay-ms",
+					&nau83110->delayed_time);
+	if (ret)
+		nau83110->delayed_time = DELAY_WORK_5S;
+
+	dev_info(dev, "workqueue delay set to %u ms", nau83110->delayed_time);
 
 	nau83110->enable_pin = devm_gpiod_get_optional(dev, "nuvoton,enable",
 		GPIOD_OUT_LOW);
-	if (IS_ERR(nau83110->enable_pin))
-		return PTR_ERR(nau83110->enable_pin);
+	if (IS_ERR(nau83110->enable_pin)) {
+		ret = PTR_ERR(nau83110->enable_pin);
+		dev_err_probe(dev, ret, "failed to get enable gpio");
+		goto err_probe;
+	}
 	gpiod_set_value(nau83110->enable_pin, 1);
 	mdelay(1);
 
-	i2c_set_clientdata(i2c, nau83110);
-
 	nau83110->regmap = devm_regmap_init_i2c(i2c, &nau83110_regmap_config);
-	if (IS_ERR(nau83110->regmap))
-		return PTR_ERR(nau83110->regmap);
+	if (IS_ERR(nau83110->regmap)) {
+		ret = PTR_ERR(nau83110->regmap);
+		dev_err_probe(dev, ret, "regmap init failed");
+		goto err_probe;
+	}
 	nau83110->dev = dev;
+
+	mutex_init(&nau83110->lock);
 
 	/* Reset the codec */
 	nau83110_software_reset(nau83110->regmap);
@@ -741,20 +864,44 @@ static int nau83110_i2c_probe(struct i2c_client *i2c)
 
 	ret = nau83110_init_regs(nau83110->regmap);
 	if (ret) {
-		dev_err(dev, "NAU83110 init failed(%d)", ret);
-		return -ENODEV;
+		dev_err_probe(dev, ret, "NAU83110 init regs failed");
+		goto err_probe;
 	}
 
-#ifdef ENABLE_ISR
 	nau83110->irq = i2c->irq;
 	if (i2c->irq) {
 		INIT_WORK(&nau83110->trigger_work, nau83110_trigger_work);
-		nau83110_setup_irq(nau83110);
+		INIT_DELAYED_WORK(&nau83110->diag_work, nau83110_diag_work);
+		ret = nau83110_setup_irq(nau83110);
+		if (ret)
+			goto err_probe;
 	}
-#endif
 
-	return devm_snd_soc_register_component(dev,
+	ret = devm_snd_soc_register_component(dev,
 		&nau83110_component_driver, &nau83110_dai, 1);
+	if (ret) {
+		dev_err_probe(dev, ret, "register component failed");
+		goto err_probe;
+	}
+	return 0;
+
+err_probe:
+	destroy_workqueue(nau83110->wq);
+	return ret;
+}
+
+static void nau83110_i2c_remove(struct i2c_client *i2c)
+{
+	struct nau83110 *nau83110 = i2c_get_clientdata(i2c);
+
+	cancel_delayed_work_sync(&nau83110->diag_work);
+	cancel_work_sync(&nau83110->trigger_work);
+
+	if (nau83110->wq)
+		destroy_workqueue(nau83110->wq);
+
+	if (nau83110->enable_pin)
+		gpiod_set_value_cansleep(nau83110->enable_pin, 0);
 }
 
 static const struct i2c_device_id nau83110_i2c_id[] = {
@@ -777,6 +924,7 @@ static struct i2c_driver nau83110_i2c_driver = {
 		.of_match_table = of_match_ptr(nau83110_of_match),
 	},
 	.probe = nau83110_i2c_probe,
+	.remove = nau83110_i2c_remove,
 	.id_table = nau83110_i2c_id,
 };
 module_i2c_driver(nau83110_i2c_driver);

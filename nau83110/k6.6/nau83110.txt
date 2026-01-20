@@ -22,6 +22,8 @@ Optional properties:
   - nuvoton,enable-gpios : GPIO specifier for the chip's Device Enable (EN) pin.
       If this option is not specified, then driver does not manage
       the pin state (e.g. chip is always on).
+  - nuvoton,wq-delay-ms : Delay in milliseconds for the SCP diagnostic workqueue.
+      Controls how often the diagnostic routine is executed after an SCP event.
 
 Example:
 

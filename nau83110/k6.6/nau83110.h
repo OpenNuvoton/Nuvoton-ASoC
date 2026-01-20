@@ -82,6 +82,11 @@
 #define NAU83110_INT_OVLOB_EN		(1 << 3)
 #define NAU83110_INT_DIANDONE_EN	(1 << 2)
 #define NAU83110_INT_SOFTMUTEDN_EN	(1 << 1)
+#define NAU83110_INT_PROT_EN \
+	(NAU83110_INT_TALARM_EN | \
+	NAU83110_INT_OWT2_EN | \
+	NAU83110_INT_OWT1_EN | \
+	NAU83110_INT_SCP_EN )
 
 /* NAU83110_R18_INTR_CTRL2 (0x18) */
 #define NAU83110_INT_BCLKDET_MASK	(1 << 15)
@@ -125,9 +130,17 @@
 #define NAU83110_INT_DIANDONE		(1 << 2)
 #define NAU83110_INT_SOFTMUTEDN		(1 << 1)
 #define NAU83110_INT_PWMMIS		(1 << 0)
+#define NAU83110_INT_DIAG ( \
+	NAU83110_INT_DIAGCMPVDDP | \
+	NAU83110_INT_DIAGCMPVDDN | \
+	NAU83110_INT_DIAGCMPVSSP | \
+	NAU83110_INT_DIAGCMPVSSN | \
+	NAU83110_INT_DIAGCMPSPKO | \
+	NAU83110_INT_DIAGCMPSPKS)
 
 /* BCLK_STATUS (0x1B) */
 #define NAU83110_BCLK_STATUS_SFT	15
+#define NAU83110_BCLK_NO_BCLK		(0x1 << NAU83110_BCLK_STATUS_SFT)
 
 /* NAU83110_R58_DAC_VOLUME_CTRL (0x58) */
 #define NAU83110_DAC_VOL_MAX		0xff
@@ -228,18 +241,28 @@
 #define NAU83110_EFUASE_READ		(0xa << NAU83110_EFUASE_SFT)
 
 /* NAU83110_RBD_PWRSTAGE_CTRL2 (0xBD) */
-#define NAU83110_PWRSTAGE_CTRL2_SFT	12
-#define NAU83110_PWRSTAGE_CTRL2		(0x1 << NAU83110_PWRSTAGE_CTRL2_SFT)
+#define NAU83110_HVDRIVER_CTRL2_SFT	12
+#define NAU83110_HVDRIVER_CTRL2		(0x1 << NAU83110_HVDRIVER_CTRL2_SFT)
+#define NAU83110_DEBONS_MASK		GENMASK(2, 0)
+
+enum {
+	DIAG_SUCCESS,
+	DIAG_FAIL,
+};
 
 struct nau83110 {
 	struct device *dev;
 	struct regmap *regmap;
 	struct gpio_desc *enable_pin;
-#ifdef ENABLE_ISR
+	struct mutex lock;
+	struct delayed_work diag_work;
 	struct work_struct trigger_work;
+	struct workqueue_struct *wq;
+	bool irq_enabled;
+	int delayed_time;
+	int diag_status;
 	int work_cmd;
 	int irq;
-#endif
 };
 
 #endif /* __NAU83110_H__ */
