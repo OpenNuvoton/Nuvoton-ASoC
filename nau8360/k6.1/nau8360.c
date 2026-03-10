@@ -1127,7 +1127,7 @@ int nau8360_startup(struct snd_pcm_substream *substream, struct snd_soc_dai *dai
 	regmap_update_bits(nau8360->regmap, NAU8360_R0B_I2S_PCM_CTRL1,
 		NAU8360_EN_TDM_TX | NAU8360_EN_TDM_RX,
 		NAU8360_EN_TDM_TX | NAU8360_EN_TDM_RX);
-	if (nau8360->dsp_enable)
+	if (nau8360->dsp_enable && substream->stream == SNDRV_PCM_STREAM_PLAYBACK)
 		snd_soc_dapm_enable_pin(nau8360->dapm, "Sense");
 
 	return 0;
@@ -1141,7 +1141,7 @@ static void nau8360_shutdown(struct snd_pcm_substream *substream,
 
 	regmap_update_bits(nau8360->regmap, NAU8360_R0B_I2S_PCM_CTRL1,
 		NAU8360_EN_TDM_TX | NAU8360_EN_TDM_RX, 0);
-	if (nau8360->dsp_enable)
+	if (nau8360->dsp_enable && substream->stream == SNDRV_PCM_STREAM_PLAYBACK)
 		snd_soc_dapm_disable_pin(nau8360->dapm, "Sense");
 }
 
