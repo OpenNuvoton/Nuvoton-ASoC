@@ -141,6 +141,7 @@ static bool nau8325_readable_reg(struct device *dev, unsigned int reg)
 static bool nau8325_writeable_reg(struct device *dev, unsigned int reg)
 {
 	switch (reg) {
+	case NAU8325_R00_HARDWARE_RST ... NAU8325_R01_SOFTWARE_RST:
 	case NAU8325_R03_CLK_CTRL ... NAU8325_R06_INT_CLR_STATUS:
 	case NAU8325_R09_IRQOUT ... NAU8325_R13_DAC_VOLUME:
 	case NAU8325_R29_DAC_CTRL1:
@@ -488,7 +489,7 @@ proc_err:
 	return -EINVAL;
 proc_done:
 
-	dev_err(nau8325->dev, "nau8325->fs=%d,range=0x%x, %s, (n1,mu,n2,dmu):(%d,%d,%d), MCLK_SRC=%uHz (%d)",
+	dev_info(nau8325->dev, "nau8325->fs=%d,range=0x%x, %s, (n1,mu,n2,dmu):(%d,%d,%d), MCLK_SRC=%uHz (%d)",
 		nau8325->fs,
 		(*srate_table)->range,
 		(*srate_table)->max ? "MAX" : "MIN",
@@ -684,6 +685,12 @@ static void nau8325_reset_chip(struct regmap *regmap)
 	regmap_write(regmap, NAU8325_R00_HARDWARE_RST, 0x0000);
 }
 
+static void nau8325_software_reset(struct regmap *regmap)
+{
+	regmap_write(regmap, NAU8325_R01_SOFTWARE_RST, 0x0000);
+	regmap_write(regmap, NAU8325_R01_SOFTWARE_RST, 0x0000);
+}
+
 static void nau8325_init_regs(struct nau8325 *nau8325)
 {
 	struct regmap *regmap = nau8325->regmap;
@@ -820,6 +827,7 @@ static int nau8325_i2c_probe(struct i2c_client *i2c)
 	nau8325_print_device_properties(nau8325);
 
 	nau8325_reset_chip(nau8325->regmap);
+	nau8325_software_reset(nau8325->regmap);
 	ret = regmap_read(nau8325->regmap, NAU8325_R02_DEVICE_ID, &value);
 	if (ret) {
 		dev_err(dev, "Failed to read device id (%d)", ret);
