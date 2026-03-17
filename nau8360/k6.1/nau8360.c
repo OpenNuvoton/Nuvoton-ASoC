@@ -806,9 +806,7 @@ static int nau8360_aif_event(struct snd_soc_dapm_widget *w,
 {
 	struct snd_soc_component *component = snd_soc_dapm_to_component(w->dapm);
 
-	if (SND_SOC_DAPM_EVENT_ON(event))
-		snd_soc_component_write(component, NAU8360_R77_SOFT_SD, NAU8360_SOFT_SD);
-	else if (SND_SOC_DAPM_EVENT_OFF(event))
+	if (SND_SOC_DAPM_EVENT_OFF(event))
 		snd_soc_component_update_bits(component, NAU8360_R67_ANALOG_CONTROL_0,
 			NAU8360_HV_EN, 0);
 
@@ -854,10 +852,6 @@ static int nau8360_hw2_event(struct snd_soc_dapm_widget *w,
 			NAU8360_HW2_CH_MUTE, 0);
 		snd_soc_component_update_bits(component, NAU8360_R9C_HW1_CTL2,
 			NAU8360_HW1_CH_MUTE, 0);
-		/* undo software shutdown and wait a delay for output DC close to zero */
-		snd_soc_component_write(component, NAU8360_R77_SOFT_SD,
-			NAU8360_SOFT_SD_EN);
-		msleep(20);
 	}
 
 	return 0;
@@ -915,7 +909,6 @@ static int nau8360_hv_event(struct snd_soc_dapm_widget *w,
 	struct snd_kcontrol *kcontrol, int event)
 {
 	struct snd_soc_component *component = snd_soc_dapm_to_component(w->dapm);
-	struct nau8360 *nau8360 = snd_soc_component_get_drvdata(component);
 
 	if (SND_SOC_DAPM_EVENT_ON(event)) {
 		/* enable Class D HV power after DAC power is stable */
