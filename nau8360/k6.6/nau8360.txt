@@ -25,6 +25,9 @@ Optional properties:
       NAU83G60 provides Advanced DSP processed audio data as AEC reference through TDM-TX.
       The AEC path only supports 48KHz sample rates.
 
+  - nuvoton,pbtl-enable: Enable PBTL Mode.
+      NAU83G60 supports PBTL mode for mono output.
+
   - nuvoton,power-supply: number from 8 to 24 that specify the voltage of the extneral power source.
       The NAU83G60 needs two external power source to operate. The VBAT is designed to connect with the external
       power supply or battery cells which the voltage range is 8V ~ 24V as the analog domain power source.

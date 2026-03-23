@@ -999,11 +999,13 @@ static int nau8360_dac_mux_put_enum(struct snd_kcontrol *kcontrol,
 	bool dsp_en = snd_soc_enum_item_to_val(e, item[0]);
 	int ret;
 
+	if (nau8360->dsp_enable == dsp_en)
+		goto done;
+
 	if (snd_soc_component_get_bias_level(component) > SND_SOC_BIAS_STANDBY) {
 		dev_err(nau8360->dev, "changing path is not allowed during playback");
 		return -EINVAL;
-	} else if (nau8360->dsp_enable == dsp_en)
-		goto done;
+	}
 
 	ret = nau8360_dsp_switch(component, dsp_en);
 	if (ret)
@@ -2295,13 +2297,18 @@ static void nau8360_init_regs(struct nau8360 *nau8360)
 		NAU8360_SCP_CLEAR_MODE_MASK | NAU8360_CM_COMP_EN,
 		NAU8360_SCP_CLEAR_MODE_AUTO | NAU8360_CM_COMP_EN);
 	/* Set Analog Mute and Class D Modulator Gain as 14dB */
-	/* adjust HW3 default volume of voltage/current sense */
 	regmap_update_bits(regmap, NAU8360_R67_ANALOG_CONTROL_0, NAU8360_ANA_MUTE |
 		NAU8360_MOD_GAIN_MASK, NAU8360_ANA_MUTE | NAU8360_MOD_GAIN_14DB);
+	/* Set Stereo or PBTL Mode */
+	regmap_update_bits(regmap, NAU8360_R67_ANALOG_CONTROL_0,
+		NAU8360_V_PBTL_EN, nau8360->pbtl_enable ? NAU8360_V_PBTL_EN : 0);
+	regmap_update_bits(regmap, NAU8360_R6C_IVSNS_CFG0,
+		NAU8360_PBTL_ISENE_LR_MASK, NAU8360_PBTL_ISENE_LR_ILR);
+	/* adjust HW3 default volume of voltage/current sense */
 	regmap_write(regmap, NAU8360_R8A_HW3_VL_CTL7, 0xbe90);
 	regmap_write(regmap, NAU8360_R8B_HW3_VR_CTL8, 0xbe90);
-	regmap_write(regmap, NAU8360_R8D_HW3_IL_CTL7, 0xc24c);
-	regmap_write(regmap, NAU8360_R8E_HW3_IR_CTL8, 0xc24c);
+	regmap_write(regmap, NAU8360_R8D_HW3_IL_CTL7, nau8360->pbtl_enable ? 0xc3aa : 0xc24c);
+	regmap_write(regmap, NAU8360_R8E_HW3_IR_CTL8, nau8360->pbtl_enable ? 0xc3aa : 0xc24c);
 	/* Set HW3 Zero THD as 0xff */
 	regmap_update_bits(regmap, NAU8360_R8F_HW3_CTL9,
 		NAU8360_HW3_ZERO_THD_MASK, 0xff);
@@ -2358,6 +2365,7 @@ static void nau8360_print_device_properties(struct nau8360 *nau8360)
 	dev_dbg(nau8360->dev, "low-latency:         %d", nau8360->low_latency);
 	dev_dbg(nau8360->dev, "anc-enable:          %d", nau8360->anc_enable);
 	dev_dbg(nau8360->dev, "aec-enable:          %d", nau8360->aec_enable);
+	dev_dbg(nau8360->dev, "pbtl-enable:         %d", nau8360->pbtl_enable);
 	dev_dbg(nau8360->dev, "power-supply:        %d", nau8360->power_supply);
 	dev_dbg(nau8360->dev, "tdm-channel-length:  %d", nau8360->tdm_chan_len);
 	for (i = 0; i < nau8360->dsp_fws_num; i++)
@@ -2375,6 +2383,7 @@ static void nau8360_read_device_properties(struct nau8360 *nau8360)
 	nau8360->low_latency = device_property_read_bool(dev, "nuvoton,low-latency");
 	nau8360->anc_enable = device_property_read_bool(dev, "nuvoton,anc-enable");
 	nau8360->aec_enable = device_property_read_bool(dev, "nuvoton,aec-enable");
+	nau8360->pbtl_enable = device_property_read_bool(dev, "nuvoton,pbtl-enable");
 	ret = device_property_read_u32(dev, "nuvoton,power-supply",
 			&nau8360->power_supply);
 	if (ret)
