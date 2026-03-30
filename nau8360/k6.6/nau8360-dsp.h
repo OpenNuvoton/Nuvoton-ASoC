@@ -21,6 +21,13 @@
 #define NAU8360_DSP_KCS_DAT_LEN_MAX		1024
 #define NAU8360_DSP_KCS_OFFSET_MAX		3072
 
+#ifdef DSP_DBG
+#define dsp_dbg(dev, fmt, ...) dev_dbg(dev, fmt, ##__VA_ARGS__)
+#else
+#define dsp_dbg(dev, fmt, ...) \
+	do { (void)(dev); no_printk(fmt, ##__VA_ARGS__); } while (0)
+#endif
+
 /* FRAME_STATUS (0x9) */
 #define NAU8360_DSP_SNS_OVF_SFT			31
 #define NAU8360_DSP_SNS_OVF			(0x1 << NAU8360_DSP_SNS_OVF_SFT)
