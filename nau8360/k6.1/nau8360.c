@@ -8,7 +8,6 @@
 //         John Hsu <kchsu0@nuvoton.com>
 
 #define DEBUG
-#undef DSP_DBG
 
 #include <linux/acpi.h>
 #include <linux/clk.h>
@@ -66,19 +65,6 @@ static int nau8360_set_sysclk(struct snd_soc_component *component,
 static const int ivsns_clk_div[] = { 1, 2, 4, 5, 8, 10 };
 
 static const int dac_clk_div[] = { 1, 2, 4, 8 };
-
-/* each PEQ band includes 10 coefficients */
-#define NAU8360_REG_DEF_PEQ(addr) \
-	{ addr, 0x0000 }, \
-	{ addr + 1, 0x0000 }, \
-	{ addr + 2, 0x0000 }, \
-	{ addr + 3, 0x0000 }, \
-	{ addr + 4, 0x0000 }, \
-	{ addr + 5, 0x0000 }, \
-	{ addr + 6, 0x0000 }, \
-	{ addr + 7, 0x0000 }, \
-	{ addr + 8, 0x0000 }, \
-	{ addr + 9, 0x0000 } \
 
 static const struct reg_default nau8360_reg_defaults[] = {
 	{ NAU8360_R02_I2C_ADDR, 0x0000 },
@@ -145,36 +131,6 @@ static const struct reg_default nau8360_reg_defaults[] = {
 	{ NAU8360_RA2_RIGHT_XODRC_CTRL, 0x0000 },
 	{ NAU8360_RA4_ANA_REG_0, 0x7f86 },
 	{ NAU8360_RA5_ANA_REG_1, 0x276e },
-	NAU8360_REG_DEF_PEQ(NAU8360_R100_LEFT_BIQ0_COE),
-	NAU8360_REG_DEF_PEQ(NAU8360_R10C_LEFT_BIQ1_COE),
-	NAU8360_REG_DEF_PEQ(NAU8360_R118_LEFT_BIQ2_COE),
-	NAU8360_REG_DEF_PEQ(NAU8360_R124_LEFT_BIQ3_COE),
-	NAU8360_REG_DEF_PEQ(NAU8360_R130_LEFT_BIQ4_COE),
-	NAU8360_REG_DEF_PEQ(NAU8360_R13C_LEFT_BIQ5_COE),
-	NAU8360_REG_DEF_PEQ(NAU8360_R148_LEFT_BIQ6_COE),
-	NAU8360_REG_DEF_PEQ(NAU8360_R154_LEFT_BIQ7_COE),
-	NAU8360_REG_DEF_PEQ(NAU8360_R160_LEFT_BIQ8_COE),
-	NAU8360_REG_DEF_PEQ(NAU8360_R16C_LEFT_BIQ9_COE),
-	NAU8360_REG_DEF_PEQ(NAU8360_R178_LEFT_BIQ10_COE),
-	NAU8360_REG_DEF_PEQ(NAU8360_R184_LEFT_BIQ11_COE),
-	NAU8360_REG_DEF_PEQ(NAU8360_R190_LEFT_BIQ12_COE),
-	NAU8360_REG_DEF_PEQ(NAU8360_R19C_LEFT_BIQ13_COE),
-	NAU8360_REG_DEF_PEQ(NAU8360_R1A8_LEFT_BIQ14_COE),
-	NAU8360_REG_DEF_PEQ(NAU8360_R200_RIGHT_BIQ0_COE),
-	NAU8360_REG_DEF_PEQ(NAU8360_R20C_RIGHT_BIQ1_COE),
-	NAU8360_REG_DEF_PEQ(NAU8360_R218_RIGHT_BIQ2_COE),
-	NAU8360_REG_DEF_PEQ(NAU8360_R224_RIGHT_BIQ3_COE),
-	NAU8360_REG_DEF_PEQ(NAU8360_R230_RIGHT_BIQ4_COE),
-	NAU8360_REG_DEF_PEQ(NAU8360_R23C_RIGHT_BIQ5_COE),
-	NAU8360_REG_DEF_PEQ(NAU8360_R248_RIGHT_BIQ6_COE),
-	NAU8360_REG_DEF_PEQ(NAU8360_R254_RIGHT_BIQ7_COE),
-	NAU8360_REG_DEF_PEQ(NAU8360_R260_RIGHT_BIQ8_COE),
-	NAU8360_REG_DEF_PEQ(NAU8360_R26C_RIGHT_BIQ9_COE),
-	NAU8360_REG_DEF_PEQ(NAU8360_R278_RIGHT_BIQ10_COE),
-	NAU8360_REG_DEF_PEQ(NAU8360_R284_RIGHT_BIQ11_COE),
-	NAU8360_REG_DEF_PEQ(NAU8360_R290_RIGHT_BIQ12_COE),
-	NAU8360_REG_DEF_PEQ(NAU8360_R29C_RIGHT_BIQ13_COE),
-	NAU8360_REG_DEF_PEQ(NAU8360_R2A8_RIGHT_BIQ14_COE),
 };
 
 static bool nau8360_readable_reg(struct device *dev, unsigned int reg)
@@ -380,13 +336,6 @@ static bool nau8360_volatile_reg(struct device *dev, unsigned int reg)
 	}
 }
 
-static const char *const modulator_analog_gain[] =
-	{ "6db", "8db", "10db", "12db", "14db", "16db", "18db", "20db" };
-
-static const struct soc_enum nau8360_modulator_gain_enum =
-	SOC_ENUM_SINGLE(NAU8360_R67_ANALOG_CONTROL_0, NAU8360_MOD_GAIN_SFT,
-		ARRAY_SIZE(modulator_analog_gain), modulator_analog_gain);
-
 static const char *const tdm_chan_length[] = { "16", "24", "32" };
 
 static const struct soc_enum nau8360_tdm_chan_len_enum =
@@ -572,45 +521,6 @@ static int nau8360_tdm_slotx_get(struct snd_kcontrol *kcontrol,
 	return 0;
 }
 
-/* The driver limits HW1 volume range from -12.0dB (0) to 12.0dB (240) in 0.1dB per step.
- * All values are multiplied by 10 during calculation process for better precision.
- * Note the default volume is 0.0dB (120).
- */
-static int nau8360_hw1_vol_put(struct snd_kcontrol *kcontrol,
-	struct snd_ctl_elem_value *ucontrol)
-{
-	#define HW1_VOL_LBD 0xc600
-	#define HW1_VOL_BASE ((0x10000 - HW1_VOL_LBD) * 10)
-	#define HW1_STEP 0x80
-	struct snd_soc_component *component = snd_soc_kcontrol_component(kcontrol);
-	struct nau8360 *nau8360 = snd_soc_component_get_drvdata(component);
-	struct soc_mixer_control *mc =
-		(struct soc_mixer_control *)kcontrol->private_value;
-	unsigned int vol_l, vol_r;
-
-	nau8360->hw1_vol_l = ucontrol->value.integer.value[0];
-	vol_l = nau8360->hw1_vol_l * HW1_STEP + HW1_VOL_BASE;
-	regmap_write(nau8360->regmap, mc->reg, 0x10000 - vol_l / 10);
-
-	nau8360->hw1_vol_r = ucontrol->value.integer.value[1];
-	vol_r = nau8360->hw1_vol_r * HW1_STEP + HW1_VOL_BASE;
-	regmap_write(nau8360->regmap, mc->rreg, 0x10000 - vol_r / 10);
-
-	return 0;
-}
-
-static int nau8360_hw1_vol_get(struct snd_kcontrol *kcontrol,
-	struct snd_ctl_elem_value *ucontrol)
-{
-	struct snd_soc_component *component = snd_soc_kcontrol_component(kcontrol);
-	struct nau8360 *nau8360 = snd_soc_component_get_drvdata(component);
-
-	ucontrol->value.integer.value[0] = nau8360->hw1_vol_l;
-	ucontrol->value.integer.value[1] = nau8360->hw1_vol_r;
-
-	return 0;
-}
-
 static inline int nau8360_peq_regaddr(const char *id_name)
 {
 	int reg, band_num, dsp_addr = NAU8360_DSP_ADDR_BYNAME(id_name);
@@ -682,33 +592,38 @@ err:
 	SND_SOC_BYTES_EXT(ch " PEQ Coefficients " band, 20, nau8360_peq_coeff_get, \
 		nau8360_peq_coeff_put)
 
-#define NAU8360_CH_PEQ_COEF_BYTES_EXT(ch) \
-	NAU8360_PEQ_COEF_BYTES_EXT(ch, "BIQ0"), \
-	NAU8360_PEQ_COEF_BYTES_EXT(ch, "BIQ1"), \
-	NAU8360_PEQ_COEF_BYTES_EXT(ch, "BIQ2"), \
-	NAU8360_PEQ_COEF_BYTES_EXT(ch, "BIQ3"), \
-	NAU8360_PEQ_COEF_BYTES_EXT(ch, "BIQ4"), \
-	NAU8360_PEQ_COEF_BYTES_EXT(ch, "BIQ5"), \
-	NAU8360_PEQ_COEF_BYTES_EXT(ch, "BIQ6"), \
-	NAU8360_PEQ_COEF_BYTES_EXT(ch, "BIQ7"), \
-	NAU8360_PEQ_COEF_BYTES_EXT(ch, "BIQ8"), \
-	NAU8360_PEQ_COEF_BYTES_EXT(ch, "BIQ9"), \
-	NAU8360_PEQ_COEF_BYTES_EXT(ch, "BIQ10"), \
-	NAU8360_PEQ_COEF_BYTES_EXT(ch, "BIQ11"), \
-	NAU8360_PEQ_COEF_BYTES_EXT(ch, "BIQ12"), \
-	NAU8360_PEQ_COEF_BYTES_EXT(ch, "BIQ13"), \
-	NAU8360_PEQ_COEF_BYTES_EXT(ch, "BIQ14")
-
-static const DECLARE_TLV_DB_MINMAX(hw1_vol_tlv, -1200, 1200);
-
 static const struct snd_kcontrol_new nau8360_snd_controls[] = {
-	NAU8360_CH_PEQ_COEF_BYTES_EXT("Left"),
-	NAU8360_CH_PEQ_COEF_BYTES_EXT("Right"),
+	NAU8360_PEQ_COEF_BYTES_EXT("Left", "BIQ0"),
+	NAU8360_PEQ_COEF_BYTES_EXT("Left", "BIQ1"),
+	NAU8360_PEQ_COEF_BYTES_EXT("Left", "BIQ2"),
+	NAU8360_PEQ_COEF_BYTES_EXT("Left", "BIQ3"),
+	NAU8360_PEQ_COEF_BYTES_EXT("Left", "BIQ4"),
+	NAU8360_PEQ_COEF_BYTES_EXT("Left", "BIQ5"),
+	NAU8360_PEQ_COEF_BYTES_EXT("Left", "BIQ6"),
+	NAU8360_PEQ_COEF_BYTES_EXT("Left", "BIQ7"),
+	NAU8360_PEQ_COEF_BYTES_EXT("Left", "BIQ8"),
+	NAU8360_PEQ_COEF_BYTES_EXT("Left", "BIQ9"),
+	NAU8360_PEQ_COEF_BYTES_EXT("Left", "BIQ10"),
+	NAU8360_PEQ_COEF_BYTES_EXT("Left", "BIQ11"),
+	NAU8360_PEQ_COEF_BYTES_EXT("Left", "BIQ12"),
+	NAU8360_PEQ_COEF_BYTES_EXT("Left", "BIQ13"),
+	NAU8360_PEQ_COEF_BYTES_EXT("Left", "BIQ14"),
 
-	SOC_ENUM("Modulator Analog Gain", nau8360_modulator_gain_enum),
-	/* volume range is from -12dB to +12dB and 0.1dB per step */
-	SOC_DOUBLE_R_EXT_TLV("HW1 Volume", NAU8360_R9A_HW1_CTL0, NAU8360_R9B_HW1_CTL1,
-		0, 240, 0, nau8360_hw1_vol_get, nau8360_hw1_vol_put, hw1_vol_tlv),
+	NAU8360_PEQ_COEF_BYTES_EXT("Right", "BIQ0"),
+	NAU8360_PEQ_COEF_BYTES_EXT("Right", "BIQ1"),
+	NAU8360_PEQ_COEF_BYTES_EXT("Right", "BIQ2"),
+	NAU8360_PEQ_COEF_BYTES_EXT("Right", "BIQ3"),
+	NAU8360_PEQ_COEF_BYTES_EXT("Right", "BIQ4"),
+	NAU8360_PEQ_COEF_BYTES_EXT("Right", "BIQ5"),
+	NAU8360_PEQ_COEF_BYTES_EXT("Right", "BIQ6"),
+	NAU8360_PEQ_COEF_BYTES_EXT("Right", "BIQ7"),
+	NAU8360_PEQ_COEF_BYTES_EXT("Right", "BIQ8"),
+	NAU8360_PEQ_COEF_BYTES_EXT("Right", "BIQ9"),
+	NAU8360_PEQ_COEF_BYTES_EXT("Right", "BIQ10"),
+	NAU8360_PEQ_COEF_BYTES_EXT("Right", "BIQ11"),
+	NAU8360_PEQ_COEF_BYTES_EXT("Right", "BIQ12"),
+	NAU8360_PEQ_COEF_BYTES_EXT("Right", "BIQ13"),
+	NAU8360_PEQ_COEF_BYTES_EXT("Right", "BIQ14"),
 
 	SOC_ENUM_EXT("TDM Channel Length", nau8360_tdm_chan_len_enum,
 		snd_soc_get_enum_double, nau8360_tdm_clen_put),
@@ -1605,8 +1520,8 @@ static int nau8360_set_sysclk(struct snd_soc_component *component,
 	int clk_id, int source, unsigned int freq, int dir)
 {
 	struct nau8360 *nau8360 = snd_soc_component_get_drvdata(component);
-	char *idtab[] = { "DIG", "ANA", "Internal" };
-	char *srctab[] = { "MCLK", "PLL", "HIRC48M", "BCLK" };
+	static const char * const idtab[] = { "DIG", "ANA", "Internal" };
+	static const char * const srctab[] = { "MCLK", "PLL", "HIRC48M", "BCLK" };
 	int ret;
 
 	if (dir == SND_SOC_CLOCK_OUT) {
@@ -1843,8 +1758,8 @@ static int nau8360_codec_probe(struct snd_soc_component *component)
 	snd_soc_dapm_sync(nau8360->dapm);
 
 	/* VBAT is assigned by system or sensed by chip. */
-	if (nau8360->power_supply)
-		vbat = nau8360->power_supply;
+	if (nau8360->vbat_voltage)
+		vbat = nau8360->vbat_voltage;
 	else
 		vbat = nau8360_vbat_level(regmap);
 	dev_dbg(dev, "VBAT %dV for nau8360", vbat);
@@ -2127,9 +2042,20 @@ static ssize_t reg_control_show(struct device *dev,
 	return count;
 }
 
-static DEVICE_ATTR(reg_control, S_IRUGO | S_IWUSR, reg_control_show, reg_control_store);
-static DEVICE_ATTR(reg_control_ext, S_IRUGO | S_IWUSR, reg_control_show,
-	reg_control_store);
+static ssize_t reg_control_ext_show(struct device *dev,
+	struct device_attribute *attr, char *buf)
+{
+	return reg_control_show(dev, attr, buf);
+}
+
+static ssize_t reg_control_ext_store(struct device *dev,
+	struct device_attribute *attr, const char *buf, size_t count)
+{
+	return reg_control_store(dev, attr, buf, count);
+}
+
+static DEVICE_ATTR_RW(reg_control);
+static DEVICE_ATTR_RW(reg_control_ext);
 
 static struct attribute *nau8360_attrs[] = {
 	&dev_attr_reg_control.attr,
@@ -2286,6 +2212,9 @@ static void nau8360_init_regs(struct nau8360 *nau8360)
 	regmap_update_bits(regmap, NAU8360_RA5_ANA_REG_1, NAU8360_SAW_PLL_MASK,
 		NAU8360_SAW_PLL_NOR);
 
+	/* Set DAC gain (0dB/+3.2dB) by current cell adjustment */
+	regmap_update_bits(regmap, NAU8360_R6E_DAC_CFG0, NAU8360_DAC_CUR_MASK,
+		nau8360->dac_cur_enable ? NAU8360_DAC_CUR_3_2DB : NAU8360_DAC_CUR_0DB);
 	/* Config trim short current reference. Enable Non-overlap longer delay.
 	 * Set segment driver as half driving strength.
 	 */
@@ -2366,7 +2295,8 @@ static void nau8360_print_device_properties(struct nau8360 *nau8360)
 	dev_dbg(nau8360->dev, "anc-enable:          %d", nau8360->anc_enable);
 	dev_dbg(nau8360->dev, "aec-enable:          %d", nau8360->aec_enable);
 	dev_dbg(nau8360->dev, "pbtl-enable:         %d", nau8360->pbtl_enable);
-	dev_dbg(nau8360->dev, "power-supply:        %d", nau8360->power_supply);
+	dev_dbg(nau8360->dev, "dac-cur-enable:      %d", nau8360->dac_cur_enable);
+	dev_dbg(nau8360->dev, "vbat-voltage:        %d", nau8360->vbat_voltage);
 	dev_dbg(nau8360->dev, "tdm-channel-length:  %d", nau8360->tdm_chan_len);
 	for (i = 0; i < nau8360->dsp_fws_num; i++)
 		dev_dbg(nau8360->dev, "dsp-fw-names[%d]:     %s", i,
@@ -2384,10 +2314,11 @@ static void nau8360_read_device_properties(struct nau8360 *nau8360)
 	nau8360->anc_enable = device_property_read_bool(dev, "nuvoton,anc-enable");
 	nau8360->aec_enable = device_property_read_bool(dev, "nuvoton,aec-enable");
 	nau8360->pbtl_enable = device_property_read_bool(dev, "nuvoton,pbtl-enable");
-	ret = device_property_read_u32(dev, "nuvoton,power-supply",
-			&nau8360->power_supply);
+	nau8360->dac_cur_enable = device_property_read_bool(dev, "nuvoton,dac-cur-enable");
+	ret = device_property_read_u32(dev, "nuvoton,vbat-voltage",
+			&nau8360->vbat_voltage);
 	if (ret)
-		nau8360->power_supply = 0;
+		nau8360->vbat_voltage = 0;
 	ret = device_property_read_u32(dev, "nuvoton,tdm-channel-length",
 			&nau8360->tdm_chan_len);
 	if (ret || (nau8360->tdm_chan_len != 16 && nau8360->tdm_chan_len != 24 &&
@@ -2410,10 +2341,44 @@ static void nau8360_read_device_properties(struct nau8360 *nau8360)
 	}
 }
 
+static struct reg_default *nau8360_alloc_defaults(struct device *dev, int *total_regs)
+{
+	struct reg_default *dyn_defaults;
+	int reg_num = ARRAY_SIZE(nau8360_reg_defaults);
+	int total = reg_num + (2 * NAU8360_TOT_BAND_PER_CH * NAU8360_TOT_BAND_COE);
+	int i, j, idx;
+
+	dyn_defaults = devm_kzalloc(dev, total * sizeof(*dyn_defaults), GFP_KERNEL);
+	if (!dyn_defaults)
+		return NULL;
+
+	memcpy(dyn_defaults, nau8360_reg_defaults, sizeof(*dyn_defaults) * reg_num);
+	idx = reg_num;
+
+	for (i = 0; i < NAU8360_TOT_BAND_PER_CH; i++) {
+		unsigned int l_base = NAU8360_R100_LEFT_BIQ0_COE +
+					(i * NAU8360_TOT_BAND_COE_RANGE);
+		unsigned int r_base = NAU8360_R200_RIGHT_BIQ0_COE +
+					(i * NAU8360_TOT_BAND_COE_RANGE);
+
+		for (j = 0; j < NAU8360_TOT_BAND_COE; j++) {
+			dyn_defaults[idx++].reg = l_base + j;
+			dyn_defaults[idx++].reg = r_base + j;
+		}
+	}
+
+	*total_regs = total;
+
+	return dyn_defaults;
+}
+
 static int nau8360_i2c_probe(struct i2c_client *i2c, const struct i2c_device_id *id)
 {
 	struct device *dev = &i2c->dev;
 	struct nau8360 *nau8360 = dev_get_platdata(dev);
+	struct regmap_config regmap_cfg = nau8360_regmap_config;
+	struct reg_default *dyn_defaults;
+	int num_total_regs;
 	int ret, value;
 
 	if (!nau8360) {
@@ -2423,7 +2388,14 @@ static int nau8360_i2c_probe(struct i2c_client *i2c, const struct i2c_device_id 
 	}
 	i2c_set_clientdata(i2c, nau8360);
 
-	nau8360->regmap = devm_regmap_init(dev, NULL, i2c, &nau8360_regmap_config);
+	dyn_defaults = nau8360_alloc_defaults(dev, &num_total_regs);
+	if (!dyn_defaults)
+		return -ENOMEM;
+
+	regmap_cfg.reg_defaults = dyn_defaults;
+	regmap_cfg.num_reg_defaults = num_total_regs;
+
+	nau8360->regmap = devm_regmap_init(dev, NULL, i2c, &regmap_cfg);
 	if (IS_ERR(nau8360->regmap))
 		return PTR_ERR(nau8360->regmap);
 	nau8360->dev = dev;

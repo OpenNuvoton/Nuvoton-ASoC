@@ -28,9 +28,12 @@ Optional properties:
   - nuvoton,pbtl-enable: Enable PBTL Mode.
       NAU83G60 supports PBTL mode for mono output.
 
-  - nuvoton,power-supply: number from 8 to 24 that specify the voltage of the extneral power source.
+  - nuvoton,vbat-voltage: number from 8 to 24 that specify the voltage of the extneral power source.
       The NAU83G60 needs two external power source to operate. The VBAT is designed to connect with the external
       power supply or battery cells which the voltage range is 8V ~ 24V as the analog domain power source.
+
+  - nuvoton,dac-cur-enable: Set DAC gain (0dB/+3.2dB) by current cell adjustment.
+      If present, enables the DAC current cell gain boost (+3.2dB). If absent, the gain is 0dB.
 
   - nuvoton,tdm-channel-length: Assign TDM channel length. The length must be 16, 24, or 32.
 
@@ -42,6 +45,6 @@ Example:
       compatible = "nuvoton,nau8360";
       reg = <0x1a>;
       nuvoton,aec-enable;
-      nuvoton,power-supply = <12>;
+      nuvoton,vbat-voltage = <12>;
       nuvoton,dsp-fw-names = "NAU83G60.kcs.bin.l" , "NAU83G60.kcs.bin.r";
   };

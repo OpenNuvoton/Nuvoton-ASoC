@@ -11,45 +11,45 @@
 #ifndef __NAU8360_H__
 #define __NAU8360_H__
 
-#define NAU8360_R00_SOFTWARE_RST                0x00
-#define NAU8360_R01_DSP_SOFTWARE_RST            0x01
-#define NAU8360_R02_I2C_ADDR                    0x02
-#define NAU8360_R03_CLK_CTRL0                   0x03
-#define NAU8360_R04_CLK_CTRL1                   0x04
-#define NAU8360_R05_INTERRUPT_CTRL              0x05
-#define NAU8360_R06_INT_CLR_STATUS              0x06
-#define NAU8360_R07_GP_CTRL                   	0x07
-#define NAU8360_R08_GP_CTRL0                	0x08
-#define NAU8360_R09_GP_CTRL1                    0x09
-#define NAU8360_R0A_GP_CTRL2                    0x0a
-#define NAU8360_R0B_I2S_PCM_CTRL1	        0x0b
-#define NAU8360_R0C_I2S_PCM_CTRL2               0x0c
-#define NAU8360_R0D_I2S_PCM_CTRL3               0x0d
-#define NAU8360_R0E_I2S_DATA_CTRL1              0x0e
-#define NAU8360_R0F_I2S_DATA_CTRL2              0x0f
-#define NAU8360_R10_I2S_DATA_CTRL3              0x10
+#define NAU8360_R00_SOFTWARE_RST		0x00
+#define NAU8360_R01_DSP_SOFTWARE_RST		0x01
+#define NAU8360_R02_I2C_ADDR			0x02
+#define NAU8360_R03_CLK_CTRL0			0x03
+#define NAU8360_R04_CLK_CTRL1			0x04
+#define NAU8360_R05_INTERRUPT_CTRL		0x05
+#define NAU8360_R06_INT_CLR_STATUS		0x06
+#define NAU8360_R07_GP_CTRL			0x07
+#define NAU8360_R08_GP_CTRL0			0x08
+#define NAU8360_R09_GP_CTRL1			0x09
+#define NAU8360_R0A_GP_CTRL2			0x0a
+#define NAU8360_R0B_I2S_PCM_CTRL1		0x0b
+#define NAU8360_R0C_I2S_PCM_CTRL2		0x0c
+#define NAU8360_R0D_I2S_PCM_CTRL3		0x0d
+#define NAU8360_R0E_I2S_DATA_CTRL1		0x0e
+#define NAU8360_R0F_I2S_DATA_CTRL2		0x0f
+#define NAU8360_R10_I2S_DATA_CTRL3		0x10
 #define NAU8360_R11_I2S_DATA_CTRL4		0x11
-#define NAU8360_R12_PATH_CTRL	                0x12
+#define NAU8360_R12_PATH_CTRL			0x12
 #define NAU8360_R16_NO_NAME			0x16
-#define NAU8360_R17_I2S0_DATA_CTRL5             0x17
-#define NAU8360_R1A_DSP_CORE_CTRL2              0x1a
+#define NAU8360_R17_I2S0_DATA_CTRL5		0x17
+#define NAU8360_R1A_DSP_CORE_CTRL2		0x1a
 #define NAU8360_R21_VBAT_READOUT		0x21
-#define NAU8360_R22_TEMP_READOUT                0x22
-#define NAU8360_R2C_ALC_CTRL1                   0x2c
-#define NAU8360_R2D_ALC_CTRL2                   0x2d
-#define NAU8360_R2E_ALC_CTRL3                   0x2e
-#define NAU8360_R31_UVLOP_CTRL1                 0x31
-#define NAU8360_R32_UVLOP_CTRL2                 0x32
-#define NAU8360_R33_UVLOP_CTRL3                 0x33
-#define NAU8360_R40_CLK_DET_CTRL                0x40
-#define NAU8360_R41_CLK_CTL2                	0x41
-#define NAU8360_R46_I2C_DEVICE_ID               0x46
-#define NAU8360_R5D_SINC_CFG                    0x5d
-#define NAU8360_R5F_ANA_TRIM_CFG1               0x5f
-#define NAU8360_R60_RST		                0x60
-#define NAU8360_R67_ANALOG_CONTROL_0            0x67
-#define NAU8360_R68_ANALOG_CONTROL_1            0x68
-#define NAU8360_R69_ANALOG_CONTROL_3            0x69
+#define NAU8360_R22_TEMP_READOUT		0x22
+#define NAU8360_R2C_ALC_CTRL1			0x2c
+#define NAU8360_R2D_ALC_CTRL2			0x2d
+#define NAU8360_R2E_ALC_CTRL3			0x2e
+#define NAU8360_R31_UVLOP_CTRL1			0x31
+#define NAU8360_R32_UVLOP_CTRL2			0x32
+#define NAU8360_R33_UVLOP_CTRL3			0x33
+#define NAU8360_R40_CLK_DET_CTRL		0x40
+#define NAU8360_R41_CLK_CTL2			0x41
+#define NAU8360_R46_I2C_DEVICE_ID		0x46
+#define NAU8360_R5D_SINC_CFG			0x5d
+#define NAU8360_R5F_ANA_TRIM_CFG1		0x5f
+#define NAU8360_R60_RST				0x60
+#define NAU8360_R67_ANALOG_CONTROL_0		0x67
+#define NAU8360_R68_ANALOG_CONTROL_1		0x68
+#define NAU8360_R69_ANALOG_CONTROL_3		0x69
 #define NAU8360_R6A_SARADC_CFG0			0x6a
 #define NAU8360_R6B_SARADC_CFG1			0x6b
 #define NAU8360_R6C_IVSNS_CFG0			0x6c
@@ -57,32 +57,32 @@
 #define NAU8360_R6E_DAC_CFG0			0x6e
 #define NAU8360_R71_CLK_DIV_CFG			0x71
 #define NAU8360_R72_PLL_CFG0			0x72
-#define NAU8360_R73_PLL_CFG1                    0x73
+#define NAU8360_R73_PLL_CFG1			0x73
 #define NAU8360_R74_PLL_CFG2			0x74
-#define NAU8360_R77_SOFT_SD                     0x77
-#define NAU8360_R78_PD_SW_DLDO                  0x78
-#define NAU8360_R79_EN_HIRC48M                  0x79
+#define NAU8360_R77_SOFT_SD			0x77
+#define NAU8360_R78_PD_SW_DLDO			0x78
+#define NAU8360_R79_EN_HIRC48M			0x79
 #define NAU8360_R7A_DAC_TRIM_CFG2		0x7a
 #define NAU8360_R7B_IVSNS_TRIM_CFG		0x7b
 #define NAU8360_R7C_MISC_TRIM_CFG		0x7c
-#define NAU8360_R7E_CLK_GATED_EN            	0x7e
-#define NAU8360_R86_HW3_CTL0                  	0x86
+#define NAU8360_R7E_CLK_GATED_EN		0x7e
+#define NAU8360_R86_HW3_CTL0			0x86
 #define NAU8360_R88_ALC_CTRL6			0x88
-#define NAU8360_R8A_HW3_VL_CTL7                 0x8a
-#define NAU8360_R8B_HW3_VR_CTL8                 0x8b
-#define NAU8360_R8C_HW3_CTL6                  	0x8c
-#define NAU8360_R8D_HW3_IL_CTL7                 0x8d
-#define NAU8360_R8E_HW3_IR_CTL8                 0x8e
-#define NAU8360_R8F_HW3_CTL9                  	0x8f
-#define NAU8360_R90_HW2_CTL0                  	0x90
-#define NAU8360_R96_HW2_CTL6                  	0x96
-#define NAU8360_R97_HW2_CTL7                    0x97
-#define NAU8360_R98_HW2_CTL8                  	0x98
-#define NAU8360_R99_HW2_CTL9                    0x99
-#define NAU8360_R9A_HW1_CTL0                    0x9a
-#define NAU8360_R9B_HW1_CTL1                  	0x9b
-#define NAU8360_R9C_HW1_CTL2                    0x9c
-#define NAU8360_R9D_PEQ_CTL	                0x9d
+#define NAU8360_R8A_HW3_VL_CTL7			0x8a
+#define NAU8360_R8B_HW3_VR_CTL8			0x8b
+#define NAU8360_R8C_HW3_CTL6			0x8c
+#define NAU8360_R8D_HW3_IL_CTL7			0x8d
+#define NAU8360_R8E_HW3_IR_CTL8			0x8e
+#define NAU8360_R8F_HW3_CTL9			0x8f
+#define NAU8360_R90_HW2_CTL0			0x90
+#define NAU8360_R96_HW2_CTL6			0x96
+#define NAU8360_R97_HW2_CTL7			0x97
+#define NAU8360_R98_HW2_CTL8			0x98
+#define NAU8360_R99_HW2_CTL9			0x99
+#define NAU8360_R9A_HW1_CTL0			0x9a
+#define NAU8360_R9B_HW1_CTL1			0x9b
+#define NAU8360_R9C_HW1_CTL2			0x9c
+#define NAU8360_R9D_PEQ_CTL			0x9d
 #define NAU8360_RA0_LEFT_XODRC_CTRL		0xa0
 #define NAU8360_RA2_RIGHT_XODRC_CTRL		0xa2
 #define NAU8360_RA4_ANA_REG_0			0xa4
@@ -119,9 +119,9 @@
 #define NAU8360_R290_RIGHT_BIQ12_COE		0x290
 #define NAU8360_R29C_RIGHT_BIQ13_COE		0x29c
 #define NAU8360_R2A8_RIGHT_BIQ14_COE		0x2a8
-#define NAU8360_RF000_DSP_COMM                  0xf000
-#define NAU8360_RF002_DSP_COMM                  0xf002
-#define NAU8360_REG_MAX                         NAU8360_RF002_DSP_COMM
+#define NAU8360_RF000_DSP_COMM			0xf000
+#define NAU8360_RF002_DSP_COMM			0xf002
+#define NAU8360_REG_MAX				NAU8360_RF002_DSP_COMM
 
 /* 16-bit control register address, and 16-bits control register data */
 #define NAU8360_REG_ADDR_LEN			16
@@ -598,7 +598,7 @@
 #define NAU8360_DAC_RES_MASK			(0x1 << NAU8360_DAC_RES_SFT)
 #define NAU8360_DAC_CUR_SFT			6
 #define NAU8360_DAC_CUR_MASK			(0x1 << NAU8360_DAC_CUR_SFT)
-#define NAU8360_DAC_CUR_2_5DB			(0x1 << NAU8360_DAC_CUR_SFT)
+#define NAU8360_DAC_CUR_3_2DB			(0x1 << NAU8360_DAC_CUR_SFT)
 #define NAU8360_DAC_CUR_0DB			(0x0 << NAU8360_DAC_CUR_SFT)
 #define NAU8360_DAC_BUFOPCUR_SFT		4
 #define NAU8360_DAC_BUFOPCUR_MASK		(0x3 << NAU8360_DAC_BUFOPCUR_SFT)
@@ -809,7 +809,7 @@
 /* DSP stereo core */
 #define NAU8360_DSP_CORE_NUM 2
 #define NAU8360_DSP_ADDR_BYNAME(x) \
-	strstr(x, "Left") ? NAU8360_RF000_DSP_COMM : NAU8360_RF002_DSP_COMM
+	(strstr((x), "Left") ? NAU8360_RF000_DSP_COMM : NAU8360_RF002_DSP_COMM)
 
 #define NAU8360_CODEC_DAI "nau8360-hifi"
 
@@ -894,8 +894,9 @@ struct nau8360 {
 	int anc_enable;
 	int aec_enable;
 	int pbtl_enable;
+	int dac_cur_enable;
 	int low_latency;
-	int power_supply;
+	int vbat_voltage;
 	/* DSP data */
 	bool dsp_enable;
 	bool dsp_created;
