@@ -54,7 +54,7 @@ static const struct nau8325_src_attr mclk_n2_div[] = {
 	{ 3, 0x3 },
 };
 
-static const struct nau8325_src_attr mclk_src_mult[] = {
+static const struct nau8325_src_attr mclk_n3_mult[] = {
 	{ 0, 0x1 },
 	{ 1, 0x2 },
 	{ 2, 0x3 },
@@ -344,7 +344,7 @@ static int nau8325_srate_clk_apply(struct nau8325 *nau8325,
 	if (mclk_mult_sel != CLK_PROC_BYPASS) {
 		regmap_update_bits(nau8325->regmap, NAU8325_R03_CLK_CTRL,
 			NAU8325_MCLK_SEL_MASK,
-			mclk_src_mult[mclk_mult_sel].val << NAU8325_MCLK_SEL_SFT);
+			mclk_n3_mult[mclk_mult_sel].val << NAU8325_MCLK_SEL_SFT);
 	} else {
 		regmap_update_bits(nau8325->regmap, NAU8325_R03_CLK_CTRL,
 			NAU8325_MCLK_SEL_MASK, 0);
@@ -461,8 +461,8 @@ static int nau8325_clksrc_choose(struct nau8325 *nau8325,
 	/* Get MCLK_SRC through 1/N, Multiplier, and then 1/N2. */
 	mclk_max = 0;
 	for (i = 0; i < ARRAY_SIZE(mclk_n1_div); i++) {
-		for (j = 0; j < ARRAY_SIZE(mclk_src_mult); j++) {
-			mclk = nau8325->mclk << mclk_src_mult[j].param;
+		for (j = 0; j < ARRAY_SIZE(mclk_n3_mult); j++) {
+			mclk = nau8325->mclk << mclk_n3_mult[j].param;
 			mclk = mclk / mclk_n1_div[i].param;
 			ratio = nau8325_clksrc_n2(nau8325,
 				*srate_table, mclk, n2_sel);
@@ -496,7 +496,7 @@ proc_done:
 		*n1_sel == CLK_PROC_BYPASS ?
 		CLK_PROC_BYPASS : mclk_n1_div[*n1_sel].param,
 		*mult_sel == CLK_PROC_BYPASS ?
-		CLK_PROC_BYPASS : 1 << mclk_src_mult[*mult_sel].param,
+		CLK_PROC_BYPASS : 1 << mclk_n3_mult[*mult_sel].param,
 		1 << mclk_n2_div[*n2_sel].param,
 		(*srate_table)->mclk_src[ratio],
 		(*srate_table)->mclk_src[ratio] / nau8325->fs);
@@ -694,6 +694,7 @@ static void nau8325_software_reset(struct regmap *regmap)
 static void nau8325_init_regs(struct nau8325 *nau8325)
 {
 	struct regmap *regmap = nau8325->regmap;
+	struct device *dev = nau8325->dev;
 
 	/* Set ALC parameters */
 	regmap_update_bits(regmap, NAU8325_R2C_ALC_CTRL1,
@@ -723,20 +724,55 @@ static void nau8325_init_regs(struct nau8325 *nau8325)
 			NAU8325_APWRUP_EN, 0);
 
 	/* DAC Reference Voltage Setting */
-	regmap_update_bits(regmap, NAU8325_R73_RDAC,
-		NAU8325_DACVREFSEL_MASK,
-		nau8325->dac_vref << NAU8325_DACVREFSEL_SFT);
+	switch (nau8325->dac_vref_microvolt) {
+	case 1800000:
+		regmap_update_bits(regmap, NAU8325_R73_RDAC,
+			NAU8325_DACVREFSEL_MASK, 0 << NAU8325_DACVREFSEL_SFT);
+		break;
+	case 2700000:
+		regmap_update_bits(regmap, NAU8325_R73_RDAC,
+			NAU8325_DACVREFSEL_MASK, 1 << NAU8325_DACVREFSEL_SFT);
+		break;
+	case 2880000:
+		regmap_update_bits(regmap, NAU8325_R73_RDAC,
+			NAU8325_DACVREFSEL_MASK, 2 << NAU8325_DACVREFSEL_SFT);
+		break;
+	case 3060000:
+		regmap_update_bits(regmap, NAU8325_R73_RDAC,
+			NAU8325_DACVREFSEL_MASK, 3 << NAU8325_DACVREFSEL_SFT);
+		break;
+	default:
+		dev_dbg(dev, "Invalid dac-vref-microvolt %d", nau8325->dac_vref_microvolt);
+
+	}
 	/* DAC Reference Voltage Decoupling Capacitors. */
 	regmap_update_bits(regmap, NAU8325_R63_ANALOG_CONTROL_3,
 		NAU8325_CLASSD_COARSE_GAIN_MASK, 0x4);
 	/* Auto-Att Min Gain 0dB, Class-D N Driver Slew Rate -25%. */
 	regmap_update_bits(regmap, NAU8325_R64_ANALOG_CONTROL_4,
-		NAU8325_CLASSD_SLEWN_MASK, 0x7);
+		NAU8325_CLASSD_SLEWN_MASK, nau8325->classd_slewrate);
 
 	/* VMID Tieoff (VMID Resistor Selection) */
-	regmap_update_bits(regmap, NAU8325_R60_BIAS_ADJ,
-		NAU8325_BIAS_VMID_SEL_MASK,
-		nau8325->vref_impedance << NAU8325_BIAS_VMID_SEL_SFT);
+	switch (nau8325->vref_impedance_ohms) {
+	case 0:
+		regmap_update_bits(regmap, NAU8325_R60_BIAS_ADJ,
+			NAU8325_BIAS_VMID_SEL_MASK, 0 << NAU8325_BIAS_VMID_SEL_SFT);
+		break;
+	case 25000:
+		regmap_update_bits(regmap, NAU8325_R60_BIAS_ADJ,
+			NAU8325_BIAS_VMID_SEL_MASK, 1 << NAU8325_BIAS_VMID_SEL_SFT);
+		break;
+	case 125000:
+		regmap_update_bits(regmap, NAU8325_R60_BIAS_ADJ,
+			NAU8325_BIAS_VMID_SEL_MASK, 2 << NAU8325_BIAS_VMID_SEL_SFT);
+		break;
+	case 2500:
+		regmap_update_bits(regmap, NAU8325_R60_BIAS_ADJ,
+			NAU8325_BIAS_VMID_SEL_MASK, 3 << NAU8325_BIAS_VMID_SEL_SFT);
+		break;
+	default:
+		dev_dbg(dev, "Invalid vref-impedance-ohms %d", nau8325->vref_impedance_ohms);
+	}
 
 	/* Enable VMID, BIAS, DAC, DCA CLOCK, Voltage/Current Amps
 	 */
@@ -773,8 +809,9 @@ static void nau8325_print_device_properties(struct nau8325 *nau8325)
 {
 	struct device *dev = nau8325->dev;
 
-	dev_dbg(dev, "vref-impedance:          %d", nau8325->vref_impedance);
-	dev_dbg(dev, "dac-vref:                %d", nau8325->dac_vref);
+	dev_dbg(dev, "vref-impedance-ohms:     %d", nau8325->vref_impedance_ohms);
+	dev_dbg(dev, "dac-vref-microvolt:      %d", nau8325->dac_vref_microvolt);
+	dev_dbg(dev, "classd-slewrate:         %d", nau8325->classd_slewrate);
 	dev_dbg(dev, "alc-enable:              %d", nau8325->alc_enable);
 	dev_dbg(dev, "clock-det-data:          %d", nau8325->clock_det_data);
 	dev_dbg(dev, "clock-detection-disable: %d", nau8325->clock_detection);
@@ -792,15 +829,19 @@ static int nau8325_read_device_properties(struct device *dev,
 	nau8325->clock_detection =
 		!device_property_read_bool(dev,	"nuvoton,clock-detection-disable");
 
-	ret = device_property_read_u32(dev, "nuvoton,vref-impedance",
-		&nau8325->vref_impedance);
+	ret = device_property_read_u32(dev, "nuvoton,vref-impedance-ohms",
+		&nau8325->vref_impedance_ohms);
 	if (ret)
-		nau8325->vref_impedance = 2;
-	ret = device_property_read_u32(dev, "nuvoton,dac-vref",
-		&nau8325->dac_vref);
+		nau8325->vref_impedance_ohms = 125000;
+	ret = device_property_read_u32(dev, "nuvoton,dac-vref-microvolt",
+		&nau8325->dac_vref_microvolt);
 	if (ret)
-		nau8325->dac_vref = 1;
+		nau8325->dac_vref_microvolt = 2880000;
 
+	ret = device_property_read_u32(dev, "nuvoton,classd-slewrate",
+		&nau8325->classd_slewrate);
+	if (ret)
+		nau8325->classd_slewrate = 7;
 	return 0;
 }
 

@@ -357,8 +357,9 @@ struct nau8325 {
 	struct regmap *regmap;
 	int mclk;
 	int fs;
-	int vref_impedance;
-	int dac_vref;
+	int vref_impedance_ohms;
+	int dac_vref_microvolt;
+	int classd_slewrate;
 	int clock_detection;
 	int clock_det_data;
 	int alc_enable;
