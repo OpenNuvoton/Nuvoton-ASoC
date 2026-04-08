@@ -14,6 +14,7 @@
 #include <linux/moduleparam.h>
 #include <linux/kernel.h>
 #include <linux/init.h>
+#include <linux/clk.h>
 #include <linux/delay.h>
 #include <linux/pm.h>
 #include <linux/i2c.h>
@@ -216,6 +217,7 @@ static int nau8822_eq_put(struct snd_kcontrol *kcontrol,
 	void *data;
 	u16 *val, value;
 	int i, reg, ret;
+	__be16 *tmp;
 
 	data = kmemdup(ucontrol->value.bytes.data,
 		params->max, GFP_KERNEL | GFP_DMA);
@@ -228,7 +230,8 @@ static int nau8822_eq_put(struct snd_kcontrol *kcontrol,
 		/* conversion of 16-bit integers between native CPU format
 		 * and big endian format
 		 */
-		value = be16_to_cpu(*(val + i));
+		tmp = (__be16 *)(val + i);
+		value = be16_to_cpup(tmp);
 		ret = snd_soc_component_write(component, reg + i, value);
 		if (ret) {
 			dev_err(component->dev,
@@ -609,19 +612,6 @@ static const struct snd_soc_dapm_route nau8822_dapm_routes[] = {
 	{"Right DAC", NULL, "Digital Loopback"},
 };
 
-static int nau8822_set_dai_sysclk(struct snd_soc_dai *dai, int clk_id,
-				 unsigned int freq, int dir)
-{
-	struct snd_soc_component *component = dai->component;
-	struct nau8822 *nau8822 = snd_soc_component_get_drvdata(component);
-
-	nau8822->div_id = clk_id;
-	nau8822->sysclk = freq;
-	dev_dbg(component->dev, "master sysclk %dHz, source %s\n", freq,
-		clk_id == NAU8822_CLK_PLL ? "PLL" : "MCLK");
-
-	return 0;
-}
 
 static int nau8822_calc_pll(unsigned int pll_in, unsigned int fs,
 				struct nau8822_pll *pll_param)
@@ -779,6 +769,35 @@ static int nau8822_set_pll(struct snd_soc_dai *dai, int pll_id, int source,
 	return 0;
 }
 
+static int nau8822_set_dai_sysclk(struct snd_soc_dai *dai, int clk_id,
+				 unsigned int freq, int dir)
+{
+	struct snd_soc_component *component = dai->component;
+	struct nau8822 *nau8822 = snd_soc_component_get_drvdata(component);
+	unsigned long mclk_freq;
+
+	nau8822->div_id = clk_id;
+	nau8822->sysclk = freq;
+
+	if (nau8822->mclk) {
+		mclk_freq = clk_get_rate(nau8822->mclk);
+		if (mclk_freq != freq) {
+			int ret = nau8822_set_pll(dai, NAU8822_CLK_MCLK,
+				NAU8822_CLK_MCLK, mclk_freq, freq);
+			if (ret) {
+				dev_err(component->dev, "Failed to set PLL\n");
+				return ret;
+			}
+			nau8822->div_id = NAU8822_CLK_PLL;
+		}
+	}
+
+	dev_dbg(component->dev, "master sysclk %dHz, source %s\n", freq,
+		nau8822->div_id == NAU8822_CLK_PLL ? "PLL" : "MCLK");
+
+	return 0;
+}
+
 static int nau8822_set_dai_fmt(struct snd_soc_dai *dai, unsigned int fmt)
 {
 	struct snd_soc_component *component = dai->component;
@@ -845,7 +864,7 @@ static int nau8822_hw_params(struct snd_pcm_substream *substream,
 {
 	struct snd_soc_codec *codec = dai->codec;
 	struct nau8822 *nau8822 = snd_soc_codec_get_drvdata(codec);
-	int val_len = 0, val_rate = 0;
+	int div = 0, val_len = 0, val_rate = 0;
 	unsigned int ctrl_val, bclk_fs, bclk_div;
 
 	/* make BCLK and LRC divide configuration if the codec as master. */
@@ -912,8 +931,10 @@ static int nau8822_hw_params(struct snd_pcm_substream *substream,
 	/* If the master clock is from MCLK, provide the runtime FS for driver
 	 * to get the master clock prescaler configuration.
 	 */
-	if (nau8822->div_id == NAU8822_CLK_MCLK)
-		nau8822_config_clkdiv(dai, 0, params_rate(params));
+	if (nau8822->div_id != NAU8822_CLK_MCLK)
+		div = nau8822->pll.mclk_scaler;
+
+	nau8822_config_clkdiv(dai, div, params_rate(params));
 
 	return 0;
 }
@@ -1017,8 +1038,9 @@ static struct snd_soc_dai_driver nau8822_dai = {
 static int nau8822_suspend(struct snd_soc_codec *codec)
 {
 	struct nau8822 *nau8822 = snd_soc_codec_get_drvdata(codec);
+	struct snd_soc_dapm_context *dapm = snd_soc_codec_get_dapm(codec);
 
-	nau8822_set_bias_level(codec, SND_SOC_BIAS_OFF);
+	snd_soc_dapm_force_bias_level(dapm, SND_SOC_BIAS_OFF);
 
 	regcache_mark_dirty(nau8822->regmap);
 
@@ -1028,10 +1050,11 @@ static int nau8822_suspend(struct snd_soc_codec *codec)
 static int nau8822_resume(struct snd_soc_codec *codec)
 {
 	struct nau8822 *nau8822 = snd_soc_codec_get_drvdata(codec);
+	struct snd_soc_dapm_context *dapm = snd_soc_codec_get_dapm(codec);
 
 	regcache_sync(nau8822->regmap);
 
-	nau8822_set_bias_level(codec, SND_SOC_BIAS_STANDBY);
+	snd_soc_dapm_force_bias_level(dapm, SND_SOC_BIAS_STANDBY);
 
 	return 0;
 }
@@ -1127,6 +1150,16 @@ static int nau8822_i2c_probe(struct i2c_client *i2c,
 	}
 	i2c_set_clientdata(i2c, nau8822);
 
+	nau8822->mclk = devm_clk_get(&i2c->dev, "mclk");
+	if (PTR_ERR(nau8822->mclk) == -EPROBE_DEFER) {
+		return -EPROBE_DEFER;
+	} else if (PTR_ERR(nau8822->mclk) == -ENOENT) {
+		/* The MCLK is managed externally or not used at all */
+		nau8822->mclk = NULL;
+		dev_info(dev, "No 'mclk' clock found, assume MCLK is managed externally");
+	} else if (IS_ERR(nau8822->mclk)) {
+		return -EINVAL;
+	}
 	nau8822->regmap = devm_regmap_init_i2c(i2c, &nau8822_regmap_config);
 	if (IS_ERR(nau8822->regmap)) {
 		ret = PTR_ERR(nau8822->regmap);
