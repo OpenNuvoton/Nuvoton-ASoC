@@ -190,7 +190,7 @@ static inline void nau83110_prot_int_enable(struct regmap *regmap, bool enable)
 static inline void nau83110_hv_driver_enable(struct regmap *regmap, bool enable)
 {
 	regmap_update_bits(regmap, NAU83110_RBD_PWRSTAGE_CTRL2,
-		NAU83110_HVDRIVER_CTRL2, enable ? NAU83110_HVDRIVER_CTRL2 : 0);
+		NAU83110_HVDRIVER_CTRL2, enable ? 0 : NAU83110_HVDRIVER_CTRL2);
 }
 
 static inline void nau83110_mute_enable(struct regmap *regmap, bool enable)
@@ -209,8 +209,8 @@ static int load_diagnostic(struct regmap *regmap)
 {
 	int bclk_status = 0;
 
-	regmap_write(regmap, NAU83110_RBB_PWRSTAGE_CTRL0, 0xb90b);
-	regmap_write(regmap, NAU83110_RBC_PWRSTAGE_CTRL1, 0x3818);
+	regmap_write(regmap, NAU83110_RBB_PWRSTAGE_CTRL0, 0x810b);
+	regmap_write(regmap, NAU83110_RBC_PWRSTAGE_CTRL1, 0x0008);
 
 	/* OSC48M Enable */
 	nau83110_osc_enable(regmap, true);
@@ -232,8 +232,8 @@ static int load_diagnostic(struct regmap *regmap)
 	/* OSC48M Disable */
 	nau83110_osc_enable(regmap, false);
 
-	regmap_write(regmap, NAU83110_RBB_PWRSTAGE_CTRL0, 0x810b);
-	regmap_write(regmap, NAU83110_RBC_PWRSTAGE_CTRL1, 0x0008);
+	regmap_write(regmap, NAU83110_RBB_PWRSTAGE_CTRL0, 0xb90b);
+	regmap_write(regmap, NAU83110_RBC_PWRSTAGE_CTRL1, 0x3818);
 
 	return 0;
 
@@ -684,34 +684,26 @@ static int nau83110_init_regs(struct regmap *regmap)
 	regmap_write(regmap, NAU83110_RB6_ANALOG_CTRL0, 0x3e8f);
 	regmap_write(regmap, NAU83110_RB7_ANALOG_CTRL1, 0x0000);
 
-	nau83110_mute_enable(regmap, true);
-	if (wait_mute_done(regmap))
-		goto timeout;
-
 	/* OSC48M Enable */
 	nau83110_osc_enable(regmap, true);
-	/* EN ATTU */
-	regmap_update_bits(regmap, NAU83110_R59_ALC_MODE_CTRL, NAU83110_ENAUTOATT,
-		NAU83110_ENAUTOATT);
-
-	nau83110_hv_driver_enable(regmap, false);
-	regmap_write(regmap, NAU83110_RBB_PWRSTAGE_CTRL0, 0xb90b);
-	regmap_write(regmap, NAU83110_RBC_PWRSTAGE_CTRL1, 0x3818);
 	/* Read Efuse */
 	regmap_update_bits(regmap, NAU83110_RA8_STANDBY_CTRL, NAU83110_EFUASE_READ_MASK,
 		NAU83110_EFUASE_READ);
 	msleep(300);
+
+	nau83110_mute_enable(regmap, true);
+	if (wait_mute_done(regmap))
+		goto timeout;
+
 	/* OSC48M Disable */
 	nau83110_osc_enable(regmap, false);
-	regmap_write(regmap, NAU83110_RBB_PWRSTAGE_CTRL0, 0x810b);
-	regmap_write(regmap, NAU83110_RBC_PWRSTAGE_CTRL1, 0x0008);
-	/* Disble SCP debounce clock */
-	regmap_update_bits(regmap, NAU83110_RBD_PWRSTAGE_CTRL2, NAU83110_DEBONS_MASK, 0);
-	/* Set gain 9dB / VDDSPK 12.8V / Temperature threshold */
-	regmap_write(regmap, NAU83110_RB6_ANALOG_CTRL0, 0x3c8f);
+
+	regmap_write(regmap, NAU83110_RBB_PWRSTAGE_CTRL0, 0xb90b);
+	regmap_write(regmap, NAU83110_RBC_PWRSTAGE_CTRL1, 0x3818);
 
 	nau83110_hv_driver_enable(regmap, true);
 	nau83110_mute_enable(regmap, false);
+
 	/* TDM RX Control */
 	regmap_write(regmap, NAU83110_R7C_TDM_RX_CTRL0, 0x000a);
 	regmap_write(regmap, NAU83110_R7D_TDM_RX_CTRL1, 0x0000);
