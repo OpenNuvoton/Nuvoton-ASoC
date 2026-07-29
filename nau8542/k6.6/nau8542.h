@@ -85,9 +85,9 @@
 #define NAU8542_REG_MAX			NAU8542_R6E_ANALOG_STATUS
 
 /* NAU8542_R01_POWER_MANAGEMENT (0x01) */
-#define NAU8542_ADC_ALL_EN	0xf
-#define NAU8542_DMIC_EN_SFT     6
+#define NAU8542_DMIC_EN_SFT	6
 #define NAU8542_DMIC_EN		(0x1 << NAU8542_DMIC_EN_SFT)
+#define NAU8542_ADC_ALL_EN	0xf
 #define NAU8542_ADC4_EN		(0x1 << 3)
 #define NAU8542_ADC3_EN		(0x1 << 2)
 #define NAU8542_ADC2_EN		(0x1 << 1)
@@ -105,7 +105,7 @@
 /* NAU8542_R03_CLOCK_SRC (0x03) */
 #define NAU8542_CLK_SRC_SFT		15
 #define NAU8542_CLK_SRC_MASK		(0x1 << NAU8542_CLK_SRC_SFT)
-#define NAU8540_CLK_SRC_VCO		(0x1 << NAU8542_CLK_SRC_SFT)
+#define NAU8542_CLK_SRC_VCO		(0x1 << NAU8542_CLK_SRC_SFT)
 #define NAU8542_CLK_SRC_MCLK		(0x0 << NAU8542_CLK_SRC_SFT)
 #define NAU8542_CLK_DMIC_SRC_SFT	10
 #define NAU8542_CLK_DMIC_SRC_MASK	(0x3 << NAU8542_CLK_DMIC_SRC_SFT)
@@ -258,6 +258,8 @@
 #define NAU8542_FEPGA2_MODCH3_SHT	(0x1 << 0)
 #define NAU8542_CODEC_DAI "nau8542-hifi"
 
+#define NAU8542_TDM_MAX_CHAN 4
+
 /* System Clock Source */
 enum {
 	NAU8542_CLK_MCLK,
@@ -290,6 +292,5 @@ struct nau8542_osr_attr {
 	unsigned int osr;
 	unsigned int clk_src;
 };
-
 
 #endif	/* __NAU8542_H__ */

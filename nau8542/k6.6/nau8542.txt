@@ -11,6 +11,8 @@ Required properties:
 Example:
 
 codec: nau8540@1c {
+       #sound-dai-cells = <0>;
        compatible = "nuvoton,nau8540";
        reg = <0x1c>;
+       status = "okay";
 };

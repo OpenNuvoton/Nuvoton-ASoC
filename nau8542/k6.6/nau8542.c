@@ -598,7 +598,10 @@ static int nau8542_set_fmt(struct snd_soc_dai *dai, unsigned int fmt)
 	regmap_update_bits(nau8542->regmap, NAU8542_R10_TDM_CTRL0,
 		NAU8542_TDM_DL_MASK | NAU8542_TDM_DF_MASK | NAU8542_TDM_MS_MASK |
 		NAU8542_TDM_BP_INV | NAU8542_TDM_PCMB_EN, ctrl1_val);
-
+	regmap_update_bits(nau8542->regmap, NAU8542_R11_TDM_CTRL1,
+		NAU8542_TDM_DO12_TRI, 0);
+	regmap_update_bits(nau8542->regmap, NAU8542_R12_TDM_CTRL2,
+		NAU8542_TDM_DO34_TRI, 0);
 	return 0;
 }
 
@@ -638,10 +641,10 @@ static int nau8542_set_tdm_slot(struct snd_soc_dai *dai,
 	regmap_update_bits(nau8542->regmap, NAU8542_R14_PWRST_CTRL,
 		NAU8542_TDM_TX_EN_MASK, ctrl4_val);
 	regmap_update_bits(nau8542->regmap, NAU8542_R11_TDM_CTRL1,
-		NAU8542_TDM_DO12_TRI, NAU8542_TDM_DO12_TRI);
+		NAU8542_TDM_DO12_TRI, 0);
 	regmap_update_bits(nau8542->regmap, NAU8542_R12_TDM_CTRL2,
 		NAU8542_TDM_DO34_TRI | NAU8542_TDM_TSLOT_L_MASK,
-		NAU8542_TDM_DO34_TRI | ctrl2_val);
+		ctrl2_val);
 
 	return 0;
 }
@@ -784,15 +787,12 @@ static int nau8542_set_pll(struct snd_soc_component *component, int pll_id, int 
 
 	switch (pll_id) {
 	case NAU8542_CLK_FLL_MCLK:
-		printk("====>NAU8542_CLK_FLL_MCLK freq_in:%d ", freq_in);
-
 		regmap_update_bits(nau8542->regmap, NAU8542_R06_FLL3,
 			NAU8542_FLL_CLK_SRC_MASK | NAU8542_GAIN_ERR_MASK,
 			NAU8542_FLL_CLK_SRC_MCLK | 0);
 		break;
 
 	case NAU8542_CLK_FLL_BLK:
-		printk("====>NAU8542_CLK_FLL_BLK freq_in:%d", freq_in);
 		regmap_update_bits(nau8542->regmap, NAU8542_R06_FLL3,
 			NAU8542_FLL_CLK_SRC_MASK | NAU8542_GAIN_ERR_MASK,
 			NAU8542_FLL_CLK_SRC_BLK |
@@ -809,7 +809,6 @@ static int nau8542_set_pll(struct snd_soc_component *component, int pll_id, int 
 		freq_out, pll_id);
 
 	fs = freq_out / 256;
-	printk("===> fs:%d", fs);
 	ret = nau8542_calc_fll_param(freq_in, fs, &fll_param);
 	if (ret < 0) {
 		dev_err(nau8542->dev, "Unsupported input clock %d\n", freq_in);
@@ -822,7 +821,7 @@ static int nau8542_set_pll(struct snd_soc_component *component, int pll_id, int 
 	nau8542_fll_apply(nau8542->regmap, &fll_param);
 	mdelay(2);
 	regmap_update_bits(nau8542->regmap, NAU8542_R03_CLOCK_SRC,
-		NAU8542_CLK_SRC_MASK, NAU8540_CLK_SRC_VCO);
+		NAU8542_CLK_SRC_MASK, NAU8542_CLK_SRC_VCO);
 	regmap_update_bits(nau8542->regmap, NAU8542_R0A_FLL_VCO_RSV,
 		NAU8542_MCLKDET_CTRLFLL_MASK, NAU8542_MCLKDET_CTRLFLL_DIS);
 	return 0;
@@ -846,7 +845,7 @@ static int nau8542_set_sysclk(struct snd_soc_component *component,
 		regmap_update_bits(nau8542->regmap, NAU8542_R09_FLL6,
 			NAU8542_DCO_EN, NAU8542_DCO_EN);
 		regmap_update_bits(nau8542->regmap, NAU8542_R03_CLOCK_SRC,
-			NAU8542_CLK_SRC_MASK, NAU8540_CLK_SRC_VCO);
+			NAU8542_CLK_SRC_MASK, NAU8542_CLK_SRC_VCO);
 		break;
 
 	default:
