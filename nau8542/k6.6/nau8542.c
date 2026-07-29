@@ -1,12 +1,10 @@
 // SPDX-License-Identifier: GPL-2.0-only
 //
-// NAU85L42 ALSA SoC audio ADC driver
+// The NAU85L42 High-Performance Quad-Channel Audio ADC Driver
 //
 // Copyright (C) 2026 Nuvoton Technology Corp.
-// Author: John Hsu <KCHSU0@nuvoton.com>
-//         Neo Chang <ylchang2@nuvoton.com>
+// Author: Neo Chang <ylchang2@nuvoton.com>
 
-#define DEBUG
 #include <linux/module.h>
 #include <linux/moduleparam.h>
 #include <linux/init.h>
@@ -1003,6 +1001,5 @@ static struct i2c_driver nau8542_i2c_driver = {
 module_i2c_driver(nau8542_i2c_driver);
 
 MODULE_DESCRIPTION("ASoC NAU85L42 ADC driver");
-MODULE_AUTHOR("John Hsu <KCHSU0@nuvoton.com>");
 MODULE_AUTHOR("Neo Chang <ylchang2@nuvoton.com>");
 MODULE_LICENSE("GPL v2");

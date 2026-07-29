@@ -1,10 +1,9 @@
 // SPDX-License-Identifier: GPL-2.0-only
 //
-// NAU85L42 ALSA SoC audio ADC driver
+// The NAU85L42 High-Performance Quad-Channel Audio ADC Driver
 //
 // Copyright (C) 2026 Nuvoton Technology Corp.
-// Author: John Hsu <KCHSU0@nuvoton.com>
-//         Neo Chang <ylchang2@nuvoton.com>
+// Author: Neo Chang <ylchang2@nuvoton.com>
 
 #ifndef __NAU8542_H__
 #define __NAU8542_H__

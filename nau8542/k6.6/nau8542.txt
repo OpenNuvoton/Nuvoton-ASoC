@@ -1,4 +1,4 @@
-NAU85L42 audio CODEC
+The NAU85L42 High-Performance Quad-Channel Audio ADC Driver
 
 This device supports I2C only.
 
