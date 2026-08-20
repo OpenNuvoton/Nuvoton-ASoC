@@ -1411,6 +1411,10 @@ err:
 			   NAU8310_R1A_DSP_CORE_CTRL2,
 			   NAU8310_DSP_RUNSTALL | NAU8310_DAC_SEL_DSP_OUT,
 			   NAU8310_DSP_RUNSTALL);
+
+	/* Switch the clock source of DSP to MCLK. */
+	regmap_update_bits(nau8310->regmap, NAU8310_R04_ENA_CTRL,
+		NAU8310_DSP_SEL_OSC, 0);
 	return ret;
 }
 EXPORT_SYMBOL_GPL(nau8310_enable_dsp);
