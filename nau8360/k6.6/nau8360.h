@@ -1,12 +1,12 @@
-/* SPDX-License-Identifier: GPL-2.0-only */
-/*
- * The NAU83G60 Stereo Class-D Amplifier with DSP and I/V-sense driver.
- *
- * Copyright (C) 2025 Nuvoton Technology Crop.
- * Author: David Lin <ctlin0@nuvoton.com>
- *        Seven Lee <wtli@nuvoton.com>
- *        John Hsu <kchsu0@nuvoton.com>
- */
+// SPDX-License-Identifier: GPL-2.0-only
+//
+// The NAU83G60 Stereo Class-D Amplifier with DSP and I/V-sense driver.
+//
+// Copyright (C) 2026 Nuvoton Technology Corp.
+// Author: David Lin <ctlin0@nuvoton.com>
+//         Seven Lee <wtli@nuvoton.com>
+//         John Hsu <kchsu0@nuvoton.com>
+//         Neo Chang <ylchang2@nuvoton.com>
 
 #ifndef __NAU8360_H__
 #define __NAU8360_H__
@@ -228,6 +228,8 @@
 #define NAU8360_FRAME_START_L2H			(0x0 << NAU8360_FRAME_START_SFT)
 #define NAU8360_RX_JUSTIFY_SFT			7
 #define NAU8360_RX_JUSTIFY_MASK			(0x1 << NAU8360_RX_JUSTIFY_SFT)
+#define NAU8360_RX_RIGHT_JUSTIFY		(0x1 << NAU8360_RX_JUSTIFY_SFT)
+#define NAU8360_RX_LEFT_JUSTIFY			(0x0 << NAU8360_RX_JUSTIFY_SFT)
 #define NAU8360_RX_OFFSET_SFT			2
 #define NAU8360_RX_OFFSET_MASK			(0x1f << NAU8360_RX_OFFSET_SFT)
 #define NAU8360_RX_OFFSET_I2S			(0x1 << NAU8360_RX_OFFSET_SFT)
@@ -253,8 +255,6 @@
 #define NAU8360_RX_DACL_MASK			0xf
 
 /* NAU8360_R0D_I2S_PCM_CTRL3 (0x0d) */
-#define NAU8360_TX_LSB_CFG_SFT			15
-#define NAU8360_TX_LSB_CFG_MASK			(0x1 << NAU8360_TX_LSB_CFG_SFT)
 #define NAU8360_TX_FILL_SFT			12
 #define NAU8360_TX_FILL_MASK			(0x1 << NAU8360_TX_FILL_SFT)
 #define NAU8360_TX_FILL_HIGHZ			(0x1 << NAU8360_TX_FILL_SFT)
@@ -484,10 +484,6 @@
 #define NAU8360_SEG_AUTO_CTRL_EN		0x1
 
 /* NAU8360_R69_ANALOG_CONTROL_3 (0x69) */
-#define NAU8360_AUTOMODE_SEGL_SFT		10
-#define NAU8360_AUTOMODE_SEGL_MASK		(0x1 << NAU8360_AUTOMODE_SEGL_SFT)
-#define NAU8360_AUTOMODE_SEGR_SFT		9
-#define NAU8360_AUTOMODE_SEGR_MASK		(0x1 << NAU8360_AUTOMODE_SEGR_SFT)
 #define NAU8360_ANA_STATUS_OTP_SFT		8
 #define NAU8360_ANA_STATUS_OTP_MASK		(0x1 << NAU8360_ANA_STATUS_OTP_SFT)
 #define NAU8360_ANA_STATUS_OVLO_SFT		7
@@ -798,6 +794,12 @@
 #define NAU8360_SW_BG_IO_CONN			(0x1 << NAU8360_SW_BG_IO_SFT)
 #define NAU8360_SW_VPTC_IO_EN			0x1
 
+/* NAU8360 VBAT Range Thresholds */
+#define NAU8360_VBAT_MIN		8
+#define NAU8360_VBAT_MID_THRES		13
+#define NAU8360_VBAT_HIGH_THRES		19
+#define NAU8360_VBAT_MAX		24
+
 /* NAU8360_R100_LEFT_BIQ0_COE (0x100)
  * NAU8360_R200_RIGHT_BIQ0_COE (0x200)
  */
@@ -811,6 +813,9 @@
 #define NAU8360_DSP_ADDR_BYNAME(x) \
 	(strstr((x), "Left") ? NAU8360_RF000_DSP_COMM : NAU8360_RF002_DSP_COMM)
 
+#define NAU8360_I2C_REG_LEN 2
+#define NAU8360_I2C_RXBUF_LEN 4
+#define NAU8360_I2C_TXBUF_LEN 6
 #define NAU8360_CODEC_DAI "nau8360-hifi"
 
 /* clock source */
@@ -836,7 +841,14 @@ enum {
 	NAU8360_MCLK_FS_RATIO_512 = 512,
 };
 
+enum {
+	NAU8360_PEQ_BAND_8  = 8,
+	NAU8360_PEQ_BAND_12 = 12,
+	NAU8360_PEQ_BAND_15 = 15,
+};
+
 #define NAU8360_TDM_MAX_CHAN 8
+#define TDM_SLOT_NONE 255
 
 enum {
 	NAU8360_TDM_DACL,
@@ -856,6 +868,12 @@ enum {
 	NAU8360_TDM_TJ,
 	NAU8360_TDM_VBAT,
 	NAU8360_TDM_TXN,
+};
+
+/* DAC Source Path*/
+enum {
+	NAU8360_DAC_SRC_HW1 = 0,
+	NAU8360_DAC_SRC_DSP,
 };
 
 /* PLL Source */
@@ -878,36 +896,25 @@ struct nau8360_pll {
 struct nau8360 {
 	struct device *dev;
 	struct regmap *regmap;
+	struct mutex lock;
 	struct snd_soc_dapm_context *dapm;
-	int irq;
 	int sys_clk;
-	int vref_impedance;
-	int dac_vref;
-	int sar_voltage;
-	int sar_compare_time;
-	int sar_sampling_time;
-	int clock_detection;
-	int clock_det_data;
-	int temp_compensation;
-	int normal_iis_data;
-	int alc_enable;
 	int anc_enable;
-	int aec_enable;
 	int pbtl_enable;
 	int dac_cur_enable;
-	int low_latency;
-	int vbat_voltage;
-	/* DSP data */
-	bool dsp_enable;
-	bool dsp_created;
-	int dsp_fws_num;
-	const char *dsp_firmware[NAU8360_DSP_CORE_NUM];
 	int kcs_setup_size;
 	struct nau8360_pll pll;
-	struct gpio_desc *reset;
-	int hw1_vol_l;
-	int hw1_vol_r;
-	int tdm_chan_len;
+	u32 tdm_tx_func_slot[NAU8360_TDM_TXN];
+	u32 tdm_rx_func_slot[NAU8360_TDM_RXN];
+	u8 i2c_read_reg[NAU8360_I2C_REG_LEN] ____cacheline_aligned;
+	u8 i2c_read_buf[NAU8360_I2C_RXBUF_LEN] ____cacheline_aligned;
+	u8 i2c_write_buf[NAU8360_I2C_TXBUF_LEN] ____cacheline_aligned;
+	struct work_struct load_fw_work;
+	const char *dsp_firmware[NAU8360_DSP_CORE_NUM];
+	bool load_fw_done;
+#ifdef DEBUG
+	unsigned int dsp_switch_state[10];
+#endif
 };
 
 #endif /* __NAU8360_H__ */

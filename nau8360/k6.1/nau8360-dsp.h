@@ -1,12 +1,12 @@
-/* SPDX-License-Identifier: GPL-2.0-only */
-/*
- * The NAU83G60 DSP driver.
- *
- * Copyright (C) 2025 Nuvoton Technology Crop.
- * Author: David Lin <ctlin0@nuvoton.com>
- *        Seven Lee <wtli@nuvoton.com>
- *        John Hsu <kchsu0@nuvoton.com>
- */
+// SPDX-License-Identifier: GPL-2.0-only
+//
+// The NAU83G60 Stereo Class-D Amplifier with DSP and I/V-sense driver.
+//
+// Copyright (C) 2026 Nuvoton Technology Corp.
+// Author: David Lin <ctlin0@nuvoton.com>
+//         Seven Lee <wtli@nuvoton.com>
+//         John Hsu <kchsu0@nuvoton.com>
+//         Neo Chang <ylchang2@nuvoton.com>
 
 #ifndef __NAU8360_DSP_H__
 #define __NAU8360_DSP_H__
@@ -20,6 +20,7 @@
 #define NAU8360_DSP_RETRY_MAX			3
 #define NAU8360_DSP_KCS_DAT_LEN_MAX		1024
 #define NAU8360_DSP_KCS_OFFSET_MAX		3072
+#define NAU8360_DSP_KCS_RSLTS_SUCCESS	0x10
 
 #ifdef DSP_DBG
 #define dsp_dbg(dev, fmt, ...) dev_dbg(dev, fmt, ##__VA_ARGS__)
@@ -59,6 +60,8 @@
 #define NAU8360_DSP_FIRMWARE			NAU8360_DSP_FIRMDIR"NAU83G60.kcs.bin"
 #define NAU8360_DSP_FW_NUM			NAU8360_DSP_CORE_NUM
 #define NAU8360_DSP_FW_NAMELEN			64
+#define NAU8360_IS_DSP_REG(reg) \
+	((reg) == NAU8360_RF000_DSP_COMM || (reg) == NAU8360_RF002_DSP_COMM)
 
 enum {
 	NAU8360_DSP_REPLY_OK,
@@ -80,22 +83,43 @@ enum {
 	NAU8360_DSP_CMD_CLK_RESTART	= 0xc,
 };
 
+#ifdef DEBUG
+enum {
+	NAU8360_DSP_CMD_COUNTER_L = 0,
+	NAU8360_DSP_CMD_COUNTER_R,
+	NAU8360_DSP_CMD_GET_FRAME_L,
+	NAU8360_DSP_CMD_GET_FRAME_R,
+	NAU8360_DSP_CMD_REVISION_L,
+	NAU8360_DSP_CMD_REVISION_R,
+	NAU8360_DSP_CMD_GET_KCS_SETUP_L,
+	NAU8360_DSP_CMD_GET_KCS_SETUP_R,
+	NAU8360_DSP_CMD_SET_KCS_SETUP_L,
+	NAU8360_DSP_CMD_SET_KCS_SETUP_R,
+	NAU8360_DSP_CMD_MAX,
+};
+#endif
+
+/**
+ * struct nau8360_cmd_info - DSP command information structure
+ * @cmd_id:     The command identification number
+ * @msg_param:  Message parameters including offset, size, and data
+ * @setup_data: Setup data for write-only operations
+ * @reply_data: Reply data received from the DSP
+ */
 struct nau8360_cmd_info {
 	int cmd_id;
-	/* parameters include offset, size, and data */
 	bool msg_param;
-	/* data for write only */
 	bool setup_data;
-	/* get data from dsp */
 	bool reply_data;
 };
 
 /**
- * set_len: length bytes of data writen
- * set_kcs_offset: address offset relative to set KCS start
- * set_kcs_data: address of data writen to KCS
- * get_len: length bytes from reply
- * get_data: address for reply data
+ * struct nau8360_kcs_setup - KCS setup configuration structure
+ * @set_len:        Length of data written in bytes
+ * @set_kcs_offset: Address offset relative to the start of KCS
+ * @set_kcs_data:   Pointer to the data written to KCS
+ * @get_len:        Length of data from the reply in bytes
+ * @get_data:       Pointer to the buffer for reply data
  */
 struct nau8360_kcs_setup {
 	int set_len;
@@ -105,7 +129,17 @@ struct nau8360_kcs_setup {
 	void *get_data;
 };
 
+/**
+ * struct nau8360_dsp_ctx - DSP context structure for firmware loading
+ * @cp:       Pointer to the ALSA SoC component structure
+ * @dsp_addr: Register address of the DSP core (Left or Right channel)
+ */
+struct nau8360_dsp_ctx {
+	struct snd_soc_component *cp;
+	int dsp_addr;
+};
+
 int nau8360_dsp_init(struct snd_soc_component *component);
-int nau8360_dsp_reinit(struct snd_soc_component *component);
+int nau8360_dsp_setup_controls(struct snd_soc_component *component);
 
 #endif /* __NAU8360_DSP_H__ */

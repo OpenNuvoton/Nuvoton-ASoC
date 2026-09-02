@@ -1,14 +1,16 @@
-// SPDX-License-Identifier: GPL-2.0
+// SPDX-License-Identifier: GPL-2.0-only
 //
 // The NAU83G60 Stereo Class-D Amplifier with DSP and I/V-sense driver.
 //
-// Copyright (C) 2025 Nuvoton Technology Crop.
+// Copyright (C) 2026 Nuvoton Technology Corp.
 // Author: David Lin <ctlin0@nuvoton.com>
 //         Seven Lee <wtli@nuvoton.com>
 //         John Hsu <kchsu0@nuvoton.com>
+//         Neo Chang <ylchang2@nuvoton.com>
 
 #define DEBUG
 
+#include <asm/unaligned.h>
 #include <linux/acpi.h>
 #include <linux/clk.h>
 #include <linux/delay.h>
@@ -17,27 +19,46 @@
 #include <linux/module.h>
 #include <linux/regmap.h>
 #include <linux/slab.h>
-#include <sound/core.h>
-#include <sound/initval.h>
-#include <sound/jack.h>
-#include <sound/pcm.h>
+#include <linux/units.h>
+#include <linux/workqueue.h>
 #include <sound/pcm_params.h>
 #include <sound/soc.h>
-#include <sound/tlv.h>
-#include <linux/gpio.h>
-#include <linux/gpio/consumer.h>
 
-#include "nau8360.h"
 #include "nau8360-dsp.h"
-
-static inline void nau8360_dsp_software_reset(struct snd_soc_component *component);
-static inline void nau8360_dsp_enable(struct regmap *regmap, bool enable);
-static int nau8360_set_sysclk(struct snd_soc_component *component,
-	int clk_id, int source, unsigned int freq, int dir);
+#include "nau8360.h"
 
 /* range of Master Clock MCLK (Hz) */
 #define MASTER_CLK_MIN 11025000
 #define MASTER_CLK_MAX 24576000
+/* DSP Optimal Clock Range 120MHz~126M(Hz) */
+#define DSP_OP_CLK48 122880000
+#define DSP_OP_CLK44 112896000
+/* the maximum frequency of DAC and IV sense clock */
+#define CLK_DA_IVSNS_MAX 6144000
+#define ADSP_SR_48000 48000
+#define ADSP_SR_44100 44100
+
+static const int ivsns_clk_div[] = { 1, 2, 4, 5, 8, 10 };
+
+static const int dac_clk_div[] = { 1, 2, 4, 8 };
+
+static const char * const nau8360_rx_func_names[] = {
+	[NAU8360_TDM_DACL] = "DAC_L",
+	[NAU8360_TDM_DACR] = "DAC_R",
+	[NAU8360_TDM_ANCL] = "ANC_L",
+	[NAU8360_TDM_ANCR] = "ANC_R",
+};
+
+static const char * const nau8360_tx_func_names[] = {
+	[NAU8360_TDM_AECL]  = "AEC_L",
+	[NAU8360_TDM_AECR]  = "AEC_R",
+	[NAU8360_TDM_ISNSL] = "ISNS_L",
+	[NAU8360_TDM_ISNSR] = "ISNS_R",
+	[NAU8360_TDM_VSNSL] = "VSNS_L",
+	[NAU8360_TDM_VSNSR] = "VSNS_R",
+	[NAU8360_TDM_TJ]    = "TJ",
+	[NAU8360_TDM_VBAT]  = "VBAT",
+};
 
 /* PLL threshold */
 #define PLL_FREQ_MIN 1000000
@@ -48,23 +69,6 @@ static int nau8360_set_sysclk(struct snd_soc_component *component,
 #define PLL_FVCO_MIN 50000000
 #define MSEL_MAX 32
 #define RSEL_MAX 4
-
-/* DSP Optimal Clock Range 120MHz~126M(Hz) */
-#define DSP_OP_CLK48 122880000
-#define DSP_OP_CLK44 112896000
-#define DSP_IDLE_CLK 12500000
-
-#define INTERNAL_CLK 48000000
-
-/* the maximum frequency of DAC and IV sense clock */
-#define CLK_DA_IVSNS_MAX 6144000
-
-#define ADSP_SR_48000 48000
-#define ADSP_SR_44100 44100
-
-static const int ivsns_clk_div[] = { 1, 2, 4, 5, 8, 10 };
-
-static const int dac_clk_div[] = { 1, 2, 4, 8 };
 
 static const struct reg_default nau8360_reg_defaults[] = {
 	{ NAU8360_R02_I2C_ADDR, 0x0000 },
@@ -336,36 +340,37 @@ static bool nau8360_volatile_reg(struct device *dev, unsigned int reg)
 	}
 }
 
-static const char *const tdm_chan_length[] = { "16", "24", "32" };
-
-static const struct soc_enum nau8360_tdm_chan_len_enum =
-	SOC_ENUM_SINGLE(NAU8360_R0C_I2S_PCM_CTRL2, NAU8360_TDM_CLEN_SFT,
-		ARRAY_SIZE(tdm_chan_length), tdm_chan_length);
-
+#ifdef DEBUG
 static const char *const tdm_data_length[] = { "16", "32" };
 
-static const char *const tdm_pdm_length[] = { "16", "24" };
+static const char *const tdm_pdm_length[] = { "16", "32" };
 
 static const char *const tdm_data_n_length[] = { "8", "16" };
 
-static const char *const tdm_slot_text[] = { "Slot 0", "Slot 1", "Slot 2",
+static const char *const tdm_tx_slot_text[] = { "Slot 0", "Slot 1", "Slot 2",
+	"Slot 3", "Slot 4", "Slot 5", "Slot 6", "Slot 7", "Slot None" };
+
+static const char *const tdm_rx_slot_text[] = { "Slot 0", "Slot 1", "Slot 2",
+	"Slot 3", "Slot None"};
+
+static const char *const tdm_pdm_slot_text[] = { "Slot 0", "Slot 1", "Slot 2",
 	"Slot 3", "Slot 4", "Slot 5", "Slot 6", "Slot 7" };
 
 static const struct soc_enum nau8360_tdm_dacl_slot_enum =
 	SOC_ENUM_SINGLE(NAU8360_R0C_I2S_PCM_CTRL2, 0,
-		ARRAY_SIZE(tdm_slot_text), tdm_slot_text);
+		ARRAY_SIZE(tdm_rx_slot_text), tdm_rx_slot_text);
 
 static const struct soc_enum nau8360_tdm_dacr_slot_enum =
 	SOC_ENUM_SINGLE(NAU8360_R0C_I2S_PCM_CTRL2, NAU8360_RX_DACR_SFT,
-		ARRAY_SIZE(tdm_slot_text), tdm_slot_text);
+		ARRAY_SIZE(tdm_rx_slot_text), tdm_rx_slot_text);
 
 static const struct soc_enum nau8360_tdm_ancl_slot_enum =
 	SOC_ENUM_SINGLE(NAU8360_R10_I2S_DATA_CTRL3, NAU8360_RX_ANC_L_SFT,
-		ARRAY_SIZE(tdm_slot_text), tdm_slot_text);
+		ARRAY_SIZE(tdm_rx_slot_text), tdm_rx_slot_text);
 
 static const struct soc_enum nau8360_tdm_ancr_slot_enum =
 	SOC_ENUM_SINGLE(NAU8360_R10_I2S_DATA_CTRL3, NAU8360_RX_ANC_R_SFT,
-		ARRAY_SIZE(tdm_slot_text), tdm_slot_text);
+		ARRAY_SIZE(tdm_rx_slot_text), tdm_rx_slot_text);
 
 static const struct soc_enum nau8360_aec_data_len_enum =
 	SOC_ENUM_DOUBLE(NAU8360_R17_I2S0_DATA_CTRL5, NAU8360_AEC_L_SLEN_SFT,
@@ -373,11 +378,11 @@ static const struct soc_enum nau8360_aec_data_len_enum =
 
 static const struct soc_enum nau8360_aecl_slot_enum =
 	SOC_VALUE_ENUM_SINGLE(NAU8360_R17_I2S0_DATA_CTRL5, NAU8360_AEC_L_SLOT_SFT, 0x3f,
-		ARRAY_SIZE(tdm_slot_text), tdm_slot_text, NULL);
+		ARRAY_SIZE(tdm_tx_slot_text), tdm_tx_slot_text, NULL);
 
 static const struct soc_enum nau8360_aecr_slot_enum =
 	SOC_VALUE_ENUM_SINGLE(NAU8360_R17_I2S0_DATA_CTRL5, 0, 0x3f,
-		ARRAY_SIZE(tdm_slot_text), tdm_slot_text, NULL);
+		ARRAY_SIZE(tdm_tx_slot_text), tdm_tx_slot_text, NULL);
 
 static const struct soc_enum nau8360_isnsl_data_len_enum =
 	SOC_ENUM_SINGLE(NAU8360_R0E_I2S_DATA_CTRL1, NAU8360_ISNS_L_SLEN_SFT,
@@ -385,7 +390,7 @@ static const struct soc_enum nau8360_isnsl_data_len_enum =
 
 static const struct soc_enum nau8360_isnsl_slot_enum =
 	SOC_VALUE_ENUM_SINGLE(NAU8360_R0E_I2S_DATA_CTRL1, NAU8360_ISNS_L_SLOT_SFT, 0x3f,
-		ARRAY_SIZE(tdm_slot_text), tdm_slot_text, NULL);
+		ARRAY_SIZE(tdm_tx_slot_text), tdm_tx_slot_text, NULL);
 
 static const struct soc_enum nau8360_isnsr_data_len_enum =
 	SOC_ENUM_SINGLE(NAU8360_R11_I2S_DATA_CTRL4, NAU8360_ISNS_R_SLEN_SFT,
@@ -393,7 +398,7 @@ static const struct soc_enum nau8360_isnsr_data_len_enum =
 
 static const struct soc_enum nau8360_isnsr_slot_enum =
 	SOC_VALUE_ENUM_SINGLE(NAU8360_R11_I2S_DATA_CTRL4, 0, 0x3f,
-		ARRAY_SIZE(tdm_slot_text), tdm_slot_text, NULL);
+		ARRAY_SIZE(tdm_tx_slot_text), tdm_tx_slot_text, NULL);
 
 static const struct soc_enum nau8360_vsnsl_data_len_enum =
 	SOC_ENUM_SINGLE(NAU8360_R0D_I2S_PCM_CTRL3, NAU8360_VSNS_L_SLEN_SFT,
@@ -401,7 +406,7 @@ static const struct soc_enum nau8360_vsnsl_data_len_enum =
 
 static const struct soc_enum nau8360_vsnsl_slot_enum =
 	SOC_VALUE_ENUM_SINGLE(NAU8360_R0D_I2S_PCM_CTRL3, 0, 0x3f,
-		ARRAY_SIZE(tdm_slot_text), tdm_slot_text, NULL);
+		ARRAY_SIZE(tdm_tx_slot_text), tdm_tx_slot_text, NULL);
 
 static const struct soc_enum nau8360_vsnsr_data_len_enum =
 	SOC_ENUM_SINGLE(NAU8360_R11_I2S_DATA_CTRL4, NAU8360_VSNS_R_SLEN_SFT,
@@ -409,15 +414,15 @@ static const struct soc_enum nau8360_vsnsr_data_len_enum =
 
 static const struct soc_enum nau8360_vsnsr_slot_enum =
 	SOC_VALUE_ENUM_SINGLE(NAU8360_R11_I2S_DATA_CTRL4, NAU8360_VSNS_R_SLOT_SFT, 0x3f,
-		ARRAY_SIZE(tdm_slot_text), tdm_slot_text, NULL);
+		ARRAY_SIZE(tdm_tx_slot_text), tdm_tx_slot_text, NULL);
 
 static const struct soc_enum nau8360_temp_slot_enum =
 	SOC_VALUE_ENUM_SINGLE(NAU8360_R10_I2S_DATA_CTRL3, 0, 0x3f,
-		ARRAY_SIZE(tdm_slot_text), tdm_slot_text, NULL);
+		ARRAY_SIZE(tdm_tx_slot_text), tdm_tx_slot_text, NULL);
 
 static const struct soc_enum nau8360_vbat_slot_enum =
 	SOC_VALUE_ENUM_SINGLE(NAU8360_R0F_I2S_DATA_CTRL2, NAU8360_VBAT_SLOT_SFT, 0x3f,
-		ARRAY_SIZE(tdm_slot_text), tdm_slot_text, NULL);
+		ARRAY_SIZE(tdm_tx_slot_text), tdm_tx_slot_text, NULL);
 
 static const struct soc_enum nau8360_pdml_data_len_enum =
 	SOC_ENUM_SINGLE(NAU8360_R0E_I2S_DATA_CTRL1, NAU8360_PDM_L_SLEN_SFT,
@@ -425,7 +430,7 @@ static const struct soc_enum nau8360_pdml_data_len_enum =
 
 static const struct soc_enum nau8360_pdml_slot_enum =
 	SOC_VALUE_ENUM_SINGLE(NAU8360_R0E_I2S_DATA_CTRL1, 0, 0x3f,
-		ARRAY_SIZE(tdm_slot_text), tdm_slot_text, NULL);
+		ARRAY_SIZE(tdm_pdm_slot_text), tdm_pdm_slot_text, NULL);
 
 static const struct soc_enum nau8360_pdmr_data_len_enum =
 	SOC_ENUM_SINGLE(NAU8360_R0F_I2S_DATA_CTRL2, NAU8360_PDM_R_SLEN_SFT,
@@ -433,7 +438,7 @@ static const struct soc_enum nau8360_pdmr_data_len_enum =
 
 static const struct soc_enum nau8360_pdmr_slot_enum =
 	SOC_VALUE_ENUM_SINGLE(NAU8360_R0F_I2S_DATA_CTRL2, 0, 0x3f,
-		ARRAY_SIZE(tdm_slot_text), tdm_slot_text, NULL);
+		ARRAY_SIZE(tdm_pdm_slot_text), tdm_pdm_slot_text, NULL);
 
 static const char *const tdm_pdm_mode[] = { "SDO=SDI", "HW2 path" };
 
@@ -441,42 +446,50 @@ static const struct soc_enum nau8360_pdm_mode_enum =
 	SOC_ENUM_SINGLE(NAU8360_R10_I2S_DATA_CTRL3, NAU8360_TDM_LOOPBACK_SFT,
 		ARRAY_SIZE(tdm_pdm_mode), tdm_pdm_mode);
 
-static int nau8360_tdm_clen_put(struct snd_kcontrol *kcontrol,
-	struct snd_ctl_elem_value *ucontrol)
+static inline int nau8360_get_tdm_tx_func_idx(struct soc_enum *e)
 {
-	struct snd_soc_component *cp = snd_soc_kcontrol_component(kcontrol);
-	struct nau8360 *nau8360 = snd_soc_component_get_drvdata(cp);
-	unsigned int *item = ucontrol->value.enumerated.item;
-	int ret;
+	switch (e->reg) {
+	case NAU8360_R17_I2S0_DATA_CTRL5:
+		return (e->shift_l == NAU8360_AEC_L_SLOT_SFT) ?
+			NAU8360_TDM_AECL : NAU8360_TDM_AECR;
 
-	ret = snd_soc_put_enum_double(kcontrol, ucontrol);
-	if (ret)
-		return ret;
-	nau8360->tdm_chan_len = 16 + item[0] * 8;
+	case NAU8360_R0E_I2S_DATA_CTRL1:
+		if (e->shift_l == NAU8360_ISNS_L_SLOT_SFT)
+			return NAU8360_TDM_ISNSL;
+		break;
 
-	return 0;
+	case NAU8360_R11_I2S_DATA_CTRL4:
+		return (e->shift_l == NAU8360_VSNS_R_SLOT_SFT) ?
+			NAU8360_TDM_VSNSR : NAU8360_TDM_ISNSR;
+
+	case NAU8360_R0D_I2S_PCM_CTRL3:
+		return NAU8360_TDM_VSNSL;
+
+	case NAU8360_R10_I2S_DATA_CTRL3:
+		return NAU8360_TDM_TJ;
+
+	case NAU8360_R0F_I2S_DATA_CTRL2:
+		if (e->shift_l == NAU8360_VBAT_SLOT_SFT)
+			return NAU8360_TDM_VBAT;
+		break;
+	}
+
+	return -EINVAL;
 }
 
-static int nau8360_anc_put(struct snd_kcontrol *kcontrol,
-	struct snd_ctl_elem_value *ucontrol)
+static inline int nau8360_get_tdm_rx_func_idx(struct soc_enum *e)
 {
-	struct snd_soc_component *cp = snd_soc_kcontrol_component(kcontrol);
-	struct nau8360 *nau8360 = snd_soc_component_get_drvdata(cp);
-	int ret, value = 8;
+	switch (e->reg) {
+	case NAU8360_R0C_I2S_PCM_CTRL2:
+		return (e->shift_l == NAU8360_RX_DACR_SFT) ?
+			NAU8360_TDM_DACR : NAU8360_TDM_DACL;
 
-	ret = snd_soc_put_volsw(kcontrol, ucontrol);
-	/* update anc flag if return value 1 and register value changed */
-	if (ret != 1)
-		goto done;
+	case NAU8360_R10_I2S_DATA_CTRL3:
+		return (e->shift_l == NAU8360_RX_ANC_R_SFT) ?
+			NAU8360_TDM_ANCR : NAU8360_TDM_ANCL;
+	}
 
-	nau8360->anc_enable = ucontrol->value.integer.value[0];
-	if (nau8360->dsp_enable)
-		value = nau8360->anc_enable ? 0xf : 0xc;
-	regmap_update_bits(nau8360->regmap, NAU8360_R9D_PEQ_CTL, NAU8360_PEQ_BAND_MASK,
-		value << NAU8360_PEQ_BAND_SFT);
-
-done:
-	return ret;
+	return -EINVAL;
 }
 
 /* TDM TX slot maps according to TDM channel length */
@@ -488,7 +501,149 @@ static inline void compute_slotx_scale(struct snd_soc_component *cp, int *scale)
 	*scale = (16 + value * 8) >> 3;
 }
 
-static int nau8360_tdm_slotx_put(struct snd_kcontrol *kcontrol,
+static int nau8360_tdm_rx_slot_put(struct snd_kcontrol *kcontrol,
+	struct snd_ctl_elem_value *ucontrol)
+{
+	struct snd_soc_component *cp = snd_soc_kcontrol_component(kcontrol);
+	struct device *dev = cp->dev;
+	struct nau8360 *nau8360 = snd_soc_component_get_drvdata(cp);
+	struct soc_enum *e = (struct soc_enum *)kcontrol->private_value;
+	unsigned int *item = ucontrol->value.enumerated.item;
+	int ret = 0, func_idx, val_to_cache;
+	bool changed = false;
+
+	func_idx = nau8360_get_tdm_rx_func_idx(e);
+	if (item[0] >= e->items || func_idx < 0)
+		return -EINVAL;
+
+	if (snd_soc_component_get_bias_level(cp) > SND_SOC_BIAS_STANDBY) {
+		dev_warn(dev, "changing tdm slot is not allowed during playback");
+		return ret;
+	}
+
+	mutex_lock(&nau8360->lock);
+
+	val_to_cache = (item[0] == NAU8360_TDM_RXN) ? TDM_SLOT_NONE : item[0];
+	if (nau8360->tdm_rx_func_slot[func_idx] == val_to_cache) {
+		dev_dbg(dev, "RX func %s: Slot no change (%d)",
+			nau8360_rx_func_names[func_idx], val_to_cache);
+		goto done;
+	}
+
+	nau8360->tdm_rx_func_slot[func_idx] = val_to_cache;
+	changed = true;
+	dev_dbg(dev, "Cache RX func %s to %s",
+		nau8360_rx_func_names[func_idx], tdm_rx_slot_text[item[0]]);
+
+	if (item[0] == NAU8360_TDM_RXN) {
+		dev_dbg(dev, "Slot is None, skipping register update");
+		goto done;
+	}
+
+	ret = snd_soc_component_update_bits(cp, e->reg, e->mask << e->shift_l,
+		item[0] << e->shift_l);
+
+done:
+	mutex_unlock(&nau8360->lock);
+	return ret < 0 ? ret : (int)changed;
+}
+
+static int nau8360_tdm_rx_slot_get(struct snd_kcontrol *kcontrol,
+	struct snd_ctl_elem_value *ucontrol)
+{
+	struct snd_soc_component *cp = snd_soc_kcontrol_component(kcontrol);
+	struct nau8360 *nau8360 = snd_soc_component_get_drvdata(cp);
+	struct soc_enum *e = (struct soc_enum *)kcontrol->private_value;
+	int func_idx, slot;
+
+	func_idx = nau8360_get_tdm_rx_func_idx(e);
+	if (func_idx < 0 || func_idx >= NAU8360_TDM_RXN)
+		return -EINVAL;
+
+	mutex_lock(&nau8360->lock);
+	slot = nau8360->tdm_rx_func_slot[func_idx];
+	mutex_unlock(&nau8360->lock);
+	if (slot == TDM_SLOT_NONE)
+		ucontrol->value.enumerated.item[0] = NAU8360_TDM_RXN;
+	else
+		ucontrol->value.enumerated.item[0] = slot;
+
+	return 0;
+}
+
+static int nau8360_tdm_tx_slot_put(struct snd_kcontrol *kcontrol,
+	struct snd_ctl_elem_value *ucontrol)
+{
+	struct snd_soc_component *cp = snd_soc_kcontrol_component(kcontrol);
+	struct device *dev = cp->dev;
+	struct nau8360 *nau8360 = snd_soc_component_get_drvdata(cp);
+	struct soc_enum *e = (struct soc_enum *)kcontrol->private_value;
+	unsigned int *item = ucontrol->value.enumerated.item;
+	int ret = 0, scale, slot, func_idx, val_to_cache;
+	bool changed = false;
+
+	func_idx = nau8360_get_tdm_tx_func_idx(e);
+	if (item[0] >= e->items || func_idx < 0)
+		return -EINVAL;
+
+	if (snd_soc_component_get_bias_level(cp) > SND_SOC_BIAS_STANDBY) {
+		dev_warn(dev, "changing tdm slot is not allowed during playback");
+		return ret;
+	}
+
+	mutex_lock(&nau8360->lock);
+
+	val_to_cache = (item[0] == NAU8360_TDM_TXN) ? TDM_SLOT_NONE : item[0];
+	if (nau8360->tdm_tx_func_slot[func_idx] == val_to_cache) {
+		dev_dbg(dev, "TX func %s: Slot no change (%d)",
+			nau8360_tx_func_names[func_idx], val_to_cache);
+		goto done;
+	}
+
+	nau8360->tdm_tx_func_slot[func_idx] = val_to_cache;
+	changed = true;
+	dev_dbg(dev, "Cache TX func %s to %s",
+		nau8360_tx_func_names[func_idx], tdm_tx_slot_text[item[0]]);
+
+	if (item[0] == NAU8360_TDM_TXN) {
+		dev_dbg(dev, "Slot is None, skipping register update");
+		goto done;
+	}
+
+	compute_slotx_scale(cp, &scale);
+	slot = item[0] * scale;
+	ret = snd_soc_component_update_bits(cp, e->reg, e->mask << e->shift_l,
+		slot << e->shift_l);
+
+done:
+	mutex_unlock(&nau8360->lock);
+	return ret < 0 ? ret : (int)changed;
+}
+
+static int nau8360_tdm_tx_slot_get(struct snd_kcontrol *kcontrol,
+	struct snd_ctl_elem_value *ucontrol)
+{
+	struct snd_soc_component *cp = snd_soc_kcontrol_component(kcontrol);
+	struct nau8360 *nau8360 = snd_soc_component_get_drvdata(cp);
+	struct soc_enum *e = (struct soc_enum *)kcontrol->private_value;
+	int func_idx, slot;
+
+	func_idx = nau8360_get_tdm_tx_func_idx(e);
+	if (func_idx < 0 || func_idx >= NAU8360_TDM_TXN)
+		return -EINVAL;
+
+	mutex_lock(&nau8360->lock);
+	slot = nau8360->tdm_tx_func_slot[func_idx];
+	mutex_unlock(&nau8360->lock);
+	if (slot == TDM_SLOT_NONE)
+		ucontrol->value.enumerated.item[0] = NAU8360_TDM_TXN;
+	else
+		ucontrol->value.enumerated.item[0] = slot;
+
+	return 0;
+}
+
+static int nau8360_pdm_slot_put(struct snd_kcontrol *kcontrol,
 	struct snd_ctl_elem_value *ucontrol)
 {
 	struct snd_soc_component *cp = snd_soc_kcontrol_component(kcontrol);
@@ -502,12 +657,10 @@ static int nau8360_tdm_slotx_put(struct snd_kcontrol *kcontrol,
 
 	compute_slotx_scale(cp, &scale);
 	slot = item[0] * scale;
-	snd_soc_component_update_bits(cp, e->reg, mask, slot << e->shift_l);
-
-	return 0;
+	return snd_soc_component_update_bits(cp, e->reg, mask, slot << e->shift_l);
 }
 
-static int nau8360_tdm_slotx_get(struct snd_kcontrol *kcontrol,
+static int nau8360_pdm_slot_get(struct snd_kcontrol *kcontrol,
 	struct snd_ctl_elem_value *ucontrol)
 {
 	struct snd_soc_component *cp = snd_soc_kcontrol_component(kcontrol);
@@ -520,14 +673,63 @@ static int nau8360_tdm_slotx_get(struct snd_kcontrol *kcontrol,
 
 	return 0;
 }
+#endif
+
+static int nau8360_get_tdm_chan_len(struct nau8360 *nau8360)
+{
+	int val = 0;
+
+	regmap_read(nau8360->regmap, NAU8360_R0C_I2S_PCM_CTRL2, &val);
+	val = (val & NAU8360_TDM_CLEN_MASK) >> NAU8360_TDM_CLEN_SFT;
+
+	return (val << 3) + 16;
+}
+
+static inline bool nau8360_dsp_active(struct snd_soc_component *comp)
+{
+	return (snd_soc_component_read(comp, NAU8360_R12_PATH_CTRL) &
+		NAU8360_DAC_SEL_DSP);
+}
+
+static int nau8360_anc_put(struct snd_kcontrol *kcontrol,
+	struct snd_ctl_elem_value *ucontrol)
+{
+	struct snd_soc_component *cp = snd_soc_kcontrol_component(kcontrol);
+	struct nau8360 *nau8360 = snd_soc_component_get_drvdata(cp);
+	int ret, value = NAU8360_PEQ_BAND_8;
+
+	mutex_lock(&nau8360->lock);
+
+	ret = snd_soc_put_volsw(kcontrol, ucontrol);
+	/* update anc flag if return value 1 and register value changed */
+	if (ret != 1)
+		goto unlock;
+
+	nau8360->anc_enable = ucontrol->value.integer.value[0];
+	if (nau8360_dsp_active(cp))
+		value = nau8360->anc_enable ? NAU8360_PEQ_BAND_15 : NAU8360_PEQ_BAND_12;
+	regmap_update_bits(nau8360->regmap, NAU8360_R9D_PEQ_CTL, NAU8360_PEQ_BAND_MASK,
+		value << NAU8360_PEQ_BAND_SFT);
+
+unlock:
+	mutex_unlock(&nau8360->lock);
+
+	return ret;
+}
+
+static inline void nau8360_peq_mem_enable(struct regmap *regmap, bool enable)
+{
+	regmap_update_bits(regmap, NAU8360_R9D_PEQ_CTL,
+		NAU8360_HW1_MEM_TEST, enable ? NAU8360_HW1_MEM_TEST : 0);
+}
 
 static inline int nau8360_peq_regaddr(const char *id_name)
 {
 	int reg, band_num, dsp_addr = NAU8360_DSP_ADDR_BYNAME(id_name);
 	char *band = strstr(id_name, "BIQ");
 
-	if (kstrtoint((band + 3), 10, &band_num))
-		return -EINPROGRESS;
+	if (!band || kstrtoint((band + 3), 10, &band_num))
+		return -EINVAL;
 	reg = dsp_addr == NAU8360_RF000_DSP_COMM ? NAU8360_R100_LEFT_BIQ0_COE :
 		NAU8360_R200_RIGHT_BIQ0_COE;
 	reg += band_num * NAU8360_TOT_BAND_COE_RANGE;
@@ -539,52 +741,97 @@ static int nau8360_peq_coeff_get(struct snd_kcontrol *kcontrol,
 	struct snd_ctl_elem_value *ucontrol)
 {
 	struct snd_soc_component *cp = snd_soc_kcontrol_component(kcontrol);
+	struct snd_soc_dapm_context *dapm = snd_soc_component_get_dapm(cp);
+	struct nau8360 *nau8360 = snd_soc_component_get_drvdata(cp);
 	struct soc_bytes_ext *params = (void *)kcontrol->private_value;
-	int i, value, reg = nau8360_peq_regaddr(kcontrol->id.name);
+	int i, value, reg, ret = 0;
 	u16 *val = (u16 *)ucontrol->value.bytes.data;
 
-	if (reg < 0)
-		return -EIO;
+	/* Use the DAPM lock to prevent race conditions during DAPM power-up
+	 * state transitions, and check component active status to prohibit
+	 * PEQ access during active audio streams (playback and capture).
+	 */
+	snd_soc_dapm_mutex_lock(dapm);
+	if (snd_soc_component_active(cp)) {
+		dev_dbg(nau8360->dev,
+			"PEQ coefficient access is ignored during audio is active");
+		ret = -EBUSY;
+		goto unlock_dapm;
+	}
 
-	snd_soc_component_update_bits(cp, NAU8360_R9D_PEQ_CTL, NAU8360_HW1_MEM_TEST,
-		NAU8360_HW1_MEM_TEST);
+	reg = nau8360_peq_regaddr(kcontrol->id.name);
+	if (reg < 0) {
+		ret = reg;
+		goto unlock_dapm;
+	}
+
+	mutex_lock(&nau8360->lock);
+	nau8360_peq_mem_enable(nau8360->regmap, true);
 	for (i = 0; i < params->max / sizeof(u16); i++) {
 		value = snd_soc_component_read(cp, reg + i);
 		*(val + i) = cpu_to_be16(value);
 	}
-	snd_soc_component_update_bits(cp, NAU8360_R9D_PEQ_CTL, NAU8360_HW1_MEM_TEST, 0);
+	nau8360_peq_mem_enable(nau8360->regmap, false);
+	mutex_unlock(&nau8360->lock);
 
-	return 0;
+unlock_dapm:
+	snd_soc_dapm_mutex_unlock(dapm);
+
+	return ret;
 }
 
 static int nau8360_peq_coeff_put(struct snd_kcontrol *kcontrol,
 	struct snd_ctl_elem_value *ucontrol)
 {
 	struct snd_soc_component *cp = snd_soc_kcontrol_component(kcontrol);
+	struct snd_soc_dapm_context *dapm = snd_soc_component_get_dapm(cp);
+	struct nau8360 *nau8360 = snd_soc_component_get_drvdata(cp);
 	struct soc_bytes_ext *params = (void *)kcontrol->private_value;
-	int i, ret, reg = nau8360_peq_regaddr(kcontrol->id.name);
-	__be16 *data;
+	int i, reg, ret = 0;
+	__be16 *data = NULL;
+	bool changed = false;
 
-	if (reg < 0) {
-		ret = -EIO;
-		goto err;
+	/* Use the DAPM lock to prevent race conditions during DAPM power-up
+	 * state transitions, and check component active status to prohibit
+	 * PEQ access during active audio streams (playback and capture).
+	 */
+	snd_soc_dapm_mutex_lock(dapm);
+	if (snd_soc_component_active(cp)) {
+		dev_dbg(nau8360->dev,
+			"PEQ coefficient access is ignored during audio is active");
+		ret = -EBUSY;
+		goto unlock_dapm;
 	}
-	data = kmemdup(ucontrol->value.bytes.data, params->max, GFP_KERNEL | GFP_DMA);
+
+	reg = nau8360_peq_regaddr(kcontrol->id.name);
+	if (reg < 0) {
+		ret = reg;
+		goto unlock_dapm;
+	}
+
+	data = kmemdup(ucontrol->value.bytes.data, params->max, GFP_KERNEL);
 	if (!data) {
 		ret = -ENOMEM;
-		goto err;
+		goto unlock_dapm;
 	}
 
-	snd_soc_component_update_bits(cp, NAU8360_R9D_PEQ_CTL, NAU8360_HW1_MEM_TEST,
-		NAU8360_HW1_MEM_TEST);
-	for (i = 0; i < params->max / sizeof(u16); i++)
-		snd_soc_component_write(cp, reg + i, be16_to_cpu(*(data + i)));
-	snd_soc_component_update_bits(cp, NAU8360_R9D_PEQ_CTL, NAU8360_HW1_MEM_TEST, 0);
+	mutex_lock(&nau8360->lock);
+	nau8360_peq_mem_enable(nau8360->regmap, true);
+	for (i = 0; i < params->max / sizeof(u16); i++) {
+		if (snd_soc_component_read(cp, reg + i) != be16_to_cpu(*(data + i))) {
+			snd_soc_component_write(cp, reg + i, be16_to_cpu(*(data + i)));
+			changed = true;
+		}
+	}
+	nau8360_peq_mem_enable(nau8360->regmap, false);
+	mutex_unlock(&nau8360->lock);
 
+	ret = changed ? 1 : 0;
+
+unlock_dapm:
+	snd_soc_dapm_mutex_unlock(dapm);
 	kfree(data);
 
-	return 0;
-err:
 	return ret;
 }
 
@@ -624,64 +871,70 @@ static const struct snd_kcontrol_new nau8360_snd_controls[] = {
 	NAU8360_PEQ_COEF_BYTES_EXT("Right", "BIQ12"),
 	NAU8360_PEQ_COEF_BYTES_EXT("Right", "BIQ13"),
 	NAU8360_PEQ_COEF_BYTES_EXT("Right", "BIQ14"),
-
-	SOC_ENUM_EXT("TDM Channel Length", nau8360_tdm_chan_len_enum,
-		snd_soc_get_enum_double, nau8360_tdm_clen_put),
-	SOC_ENUM("DACL TDM RX Slot", nau8360_tdm_dacl_slot_enum),
-	SOC_ENUM("DACR TDM RX Slot", nau8360_tdm_dacr_slot_enum),
+	SOC_SINGLE("Low Latency Switch", NAU8360_R96_HW2_CTL6,
+		NAU8360_HW2_LATENCY_SFT, 1, 0),
 	SOC_SINGLE_EXT("ANC Path Switch", NAU8360_R96_HW2_CTL6, NAU8360_HW1_ANC_EN_SFT,
 		1, 0, snd_soc_get_volsw, nau8360_anc_put),
-	SOC_ENUM("ANCL TDM RX Slot", nau8360_tdm_ancl_slot_enum),
-	SOC_ENUM("ANCR TDM RX Slot", nau8360_tdm_ancr_slot_enum),
+#ifdef DEBUG
+	SOC_ENUM_EXT("DACL TDM RX Slot", nau8360_tdm_dacl_slot_enum,
+		nau8360_tdm_rx_slot_get, nau8360_tdm_rx_slot_put),
+	SOC_ENUM_EXT("DACR TDM RX Slot", nau8360_tdm_dacr_slot_enum,
+		nau8360_tdm_rx_slot_get, nau8360_tdm_rx_slot_put),
+
+	SOC_ENUM_EXT("ANCL TDM RX Slot", nau8360_tdm_ancl_slot_enum,
+		nau8360_tdm_rx_slot_get, nau8360_tdm_rx_slot_put),
+	SOC_ENUM_EXT("ANCR TDM RX Slot", nau8360_tdm_ancr_slot_enum,
+		nau8360_tdm_rx_slot_get, nau8360_tdm_rx_slot_put),
 
 	SOC_DOUBLE("AEC REF Switch", NAU8360_R17_I2S0_DATA_CTRL5,
 		NAU8360_AEC_L_EN_SFT, NAU8360_AEC_R_EN_SFT, 1, 0),
 	SOC_ENUM("AEC REF Data Length", nau8360_aec_data_len_enum),
 	SOC_ENUM_EXT("AEC Left REF Slot", nau8360_aecl_slot_enum,
-		nau8360_tdm_slotx_get, nau8360_tdm_slotx_put),
+		nau8360_tdm_tx_slot_get, nau8360_tdm_tx_slot_put),
 	SOC_ENUM_EXT("AEC Right REF Slot", nau8360_aecr_slot_enum,
-		nau8360_tdm_slotx_get, nau8360_tdm_slotx_put),
+		nau8360_tdm_tx_slot_get, nau8360_tdm_tx_slot_put),
 
 	SOC_SINGLE("ISNSL TDM TX Switch", NAU8360_R0E_I2S_DATA_CTRL1,
 		NAU8360_ISNS_L_TX_EN_SFT, 1, 0),
 	SOC_ENUM("ISNSL TDM Data Length", nau8360_isnsl_data_len_enum),
 	SOC_ENUM_EXT("ISNSL TDM TX Slot", nau8360_isnsl_slot_enum,
-		nau8360_tdm_slotx_get, nau8360_tdm_slotx_put),
+		nau8360_tdm_tx_slot_get, nau8360_tdm_tx_slot_put),
 	SOC_SINGLE("ISNSR TDM TX Switch", NAU8360_R11_I2S_DATA_CTRL4,
 		NAU8360_ISNS_R_TX_EN_SFT, 1, 0),
 	SOC_ENUM("ISNSR TDM Data Length", nau8360_isnsr_data_len_enum),
 	SOC_ENUM_EXT("ISNSR TDM TX Slot", nau8360_isnsr_slot_enum,
-		nau8360_tdm_slotx_get, nau8360_tdm_slotx_put),
+		nau8360_tdm_tx_slot_get, nau8360_tdm_tx_slot_put),
 
 	SOC_SINGLE("VSNSL TDM TX Switch", NAU8360_R0D_I2S_PCM_CTRL3,
 		NAU8360_VSNS_L_TX_EN_SFT, 1, 0),
 	SOC_ENUM("VSNSL TDM Data Length", nau8360_vsnsl_data_len_enum),
 	SOC_ENUM_EXT("VSNSL TDM TX Slot", nau8360_vsnsl_slot_enum,
-		nau8360_tdm_slotx_get, nau8360_tdm_slotx_put),
+		nau8360_tdm_tx_slot_get, nau8360_tdm_tx_slot_put),
 	SOC_SINGLE("VSNSR TDM TX Switch", NAU8360_R11_I2S_DATA_CTRL4,
 		NAU8360_VSNS_R_TX_EN_SFT, 1, 0),
 	SOC_ENUM("VSNSR TDM Data Length", nau8360_vsnsr_data_len_enum),
 	SOC_ENUM_EXT("VSNSR TDM TX Slot", nau8360_vsnsr_slot_enum,
-		nau8360_tdm_slotx_get, nau8360_tdm_slotx_put),
+		nau8360_tdm_tx_slot_get, nau8360_tdm_tx_slot_put),
 
 	SOC_SINGLE("Junction Temperature TDM TX Switch", NAU8360_R10_I2S_DATA_CTRL3,
 		NAU8360_TEMP_TX_EN_SFT, 1, 0),
 	SOC_ENUM_EXT("Junction Temperature TDM TX Slot", nau8360_temp_slot_enum,
-		nau8360_tdm_slotx_get, nau8360_tdm_slotx_put),
+		nau8360_tdm_tx_slot_get, nau8360_tdm_tx_slot_put),
 	SOC_SINGLE("VBAT Measured TDM TX Switch", NAU8360_R0F_I2S_DATA_CTRL2,
 		NAU8360_VBAT_TX_EN_SFT, 1, 0),
 	SOC_ENUM_EXT("VBAT Measured TDM TX Slot", nau8360_vbat_slot_enum,
-		nau8360_tdm_slotx_get, nau8360_tdm_slotx_put),
+		nau8360_tdm_tx_slot_get, nau8360_tdm_tx_slot_put),
 
-	SOC_DOUBLE_R("TDM Loopback Switch", NAU8360_R0E_I2S_DATA_CTRL1,
+	SOC_DOUBLE_R("PDM Loopback Switch", NAU8360_R0E_I2S_DATA_CTRL1,
 		NAU8360_R0F_I2S_DATA_CTRL2, NAU8360_PDM_L_TX_EN_SFT, 1, 0),
-	SOC_ENUM("TDM Loopback Left Data Length", nau8360_pdml_data_len_enum),
-	SOC_ENUM_EXT("TDM Loopback Left Slot", nau8360_pdml_slot_enum,
-		nau8360_tdm_slotx_get, nau8360_tdm_slotx_put),
-	SOC_ENUM("TDM Loopback Right Data Length", nau8360_pdmr_data_len_enum),
-	SOC_ENUM_EXT("TDM Loopback Right Slot", nau8360_pdmr_slot_enum,
-		nau8360_tdm_slotx_get, nau8360_tdm_slotx_put),
-	SOC_ENUM("TDM Loopback Mode", nau8360_pdm_mode_enum),
+	SOC_ENUM("PDM Loopback Left Data Length", nau8360_pdml_data_len_enum),
+	SOC_ENUM_EXT("PDM Loopback Left Slot", nau8360_pdml_slot_enum,
+		nau8360_pdm_slot_get, nau8360_pdm_slot_put),
+	SOC_ENUM("PDM Loopback Right Data Length", nau8360_pdmr_data_len_enum),
+	SOC_ENUM_EXT("PDM Loopback Right Slot", nau8360_pdmr_slot_enum,
+		nau8360_pdm_slot_get, nau8360_pdm_slot_put),
+	SOC_ENUM("PDM Loopback Mode", nau8360_pdm_mode_enum),
+#endif
 };
 
 static int nau8360_adci_event(struct snd_soc_dapm_widget *w,
@@ -772,50 +1025,16 @@ static int nau8360_hw2_event(struct snd_soc_dapm_widget *w,
 	return 0;
 }
 
-static int nau8360_adacl_event(struct snd_soc_dapm_widget *w,
+static int nau8360_dac_power_event(struct snd_soc_dapm_widget *w,
 	struct snd_kcontrol *kcontrol, int event)
 {
-	struct snd_soc_component *component = snd_soc_dapm_to_component(w->dapm);
+	struct snd_soc_component *cp = snd_soc_dapm_to_component(w->dapm);
+	unsigned int mask = 1 << w->shift;
 
 	if (SND_SOC_DAPM_EVENT_ON(event))
-		snd_soc_component_update_bits(component, NAU8360_R6E_DAC_CFG0,
-			NAU8360_PD_DACL_DIS, 0);
-
-	return 0;
-}
-
-static int nau8360_adacr_event(struct snd_soc_dapm_widget *w,
-	struct snd_kcontrol *kcontrol, int event)
-{
-	struct snd_soc_component *component = snd_soc_dapm_to_component(w->dapm);
-
-	if (SND_SOC_DAPM_EVENT_ON(event))
-		snd_soc_component_update_bits(component, NAU8360_R6E_DAC_CFG0,
-			NAU8360_PD_DACR_DIS, 0);
-
-	return 0;
-}
-
-static int nau8360_dacl_event(struct snd_soc_dapm_widget *w,
-	struct snd_kcontrol *kcontrol, int event)
-{
-	struct snd_soc_component *component = snd_soc_dapm_to_component(w->dapm);
-
-	if (SND_SOC_DAPM_EVENT_OFF(event))
-		snd_soc_component_update_bits(component, NAU8360_R6E_DAC_CFG0,
-			NAU8360_PD_DACL_DIS, NAU8360_PD_DACL_DIS);
-
-	return 0;
-}
-
-static int nau8360_dacr_event(struct snd_soc_dapm_widget *w,
-	struct snd_kcontrol *kcontrol, int event)
-{
-	struct snd_soc_component *component = snd_soc_dapm_to_component(w->dapm);
-
-	if (SND_SOC_DAPM_EVENT_OFF(event))
-		snd_soc_component_update_bits(component, NAU8360_R6E_DAC_CFG0,
-			NAU8360_PD_DACR_DIS, NAU8360_PD_DACR_DIS);
+		snd_soc_component_update_bits(cp, NAU8360_R6E_DAC_CFG0, mask, 0);
+	else if (SND_SOC_DAPM_EVENT_OFF(event))
+		snd_soc_component_update_bits(cp, NAU8360_R6E_DAC_CFG0, mask, mask);
 
 	return 0;
 }
@@ -839,17 +1058,10 @@ static int nau8360_hv_event(struct snd_soc_dapm_widget *w,
 		snd_soc_component_update_bits(component, NAU8360_R68_ANALOG_CONTROL_1,
 			NAU8360_DRVCTL_SEGL_FULL | NAU8360_DRVCTL_SEGR_FULL,
 			NAU8360_DRVCTL_SEGL_FULL | NAU8360_DRVCTL_SEGR_FULL);
-	}
 
-	return 0;
-}
-
-static int nau8360_hv_pre_event(struct snd_soc_dapm_widget *w,
-	struct snd_kcontrol *kcontrol, int event)
-{
-	struct snd_soc_component *component = snd_soc_dapm_to_component(w->dapm);
-
-	if (SND_SOC_DAPM_EVENT_OFF(event)) {
+		snd_soc_component_update_bits(component, NAU8360_R67_ANALOG_CONTROL_0,
+			NAU8360_ANA_MUTE, 0);
+	} else if (SND_SOC_DAPM_EVENT_OFF(event)) {
 		snd_soc_component_update_bits(component, NAU8360_R9C_HW1_CTL2,
 			NAU8360_HW1_CH_MUTE, NAU8360_HW1_CH_MUTE);
 		snd_soc_component_update_bits(component, NAU8360_R99_HW2_CTL9,
@@ -859,48 +1071,36 @@ static int nau8360_hv_pre_event(struct snd_soc_dapm_widget *w,
 	return 0;
 }
 
-static int nau8360_hv_post_event(struct snd_soc_dapm_widget *w,
-	struct snd_kcontrol *kcontrol, int event)
+static inline void nau8360_dsp_enable(struct regmap *regmap, bool enable)
 {
-	struct snd_soc_component *component = snd_soc_dapm_to_component(w->dapm);
-
-	if (SND_SOC_DAPM_EVENT_ON(event))
-		snd_soc_component_update_bits(component, NAU8360_R67_ANALOG_CONTROL_0,
-			NAU8360_ANA_MUTE, 0);
-
-	return 0;
+	regmap_update_bits(regmap, NAU8360_R86_HW3_CTL0, NAU8360_HW3_STALL,
+		enable ? 0 : NAU8360_HW3_STALL);
+	regmap_update_bits(regmap, NAU8360_R1A_DSP_CORE_CTRL2, NAU8360_DSP_RUNSTALL,
+		enable ? 0 : NAU8360_DSP_RUNSTALL);
 }
 
-static int nau8360_dsp_switch(struct snd_soc_component *component, bool enable)
+static void nau8360_dsp_switch(struct snd_soc_component *component, bool enable)
 {
 	struct nau8360 *nau8360 = snd_soc_component_get_drvdata(component);
 	struct regmap *regmap = nau8360->regmap;
-	int ret, value = 8;
+	int value = NAU8360_PEQ_BAND_8;
+
+	mutex_lock(&nau8360->lock);
 
 	/* If DSP is enabled, unstall HW3 engine and DSP, loading DSP firmware,
 	 * and configure PEQ after dsp reset.
 	 */
 	if (enable) {
-		nau8360_dsp_software_reset(component);
-		value = nau8360->anc_enable ? 0xf : 0xc;
+		value = nau8360->anc_enable ? NAU8360_PEQ_BAND_15 : NAU8360_PEQ_BAND_12;
 		nau8360_dsp_enable(regmap, true);
-		if (!nau8360->dsp_created)
-			ret = nau8360_dsp_init(component);
-		else
-			ret = nau8360_dsp_reinit(component);
-		if (ret) {
-			nau8360_dsp_enable(regmap, false);
-			dev_err(nau8360->dev, "can't enable DSP (%d)", ret);
-			return ret;
-		}
 	} else {
-		dev_warn(nau8360->dev, "Bypass DSP !!");
+		dev_dbg(nau8360->dev, "Bypass DSP path");
 		nau8360_dsp_enable(regmap, false);
 	}
 	regmap_update_bits(regmap, NAU8360_R9D_PEQ_CTL, NAU8360_PEQ_BAND_MASK,
 		value << NAU8360_PEQ_BAND_SFT);
 
-	return 0;
+	mutex_unlock(&nau8360->lock);
 }
 
 static int nau8360_dac_mux_put_enum(struct snd_kcontrol *kcontrol,
@@ -911,34 +1111,32 @@ static int nau8360_dac_mux_put_enum(struct snd_kcontrol *kcontrol,
 	struct nau8360 *nau8360 = snd_soc_component_get_drvdata(component);
 	struct soc_enum *e = (struct soc_enum *)kcontrol->private_value;
 	unsigned int *item = ucontrol->value.enumerated.item;
-	bool dsp_en = snd_soc_enum_item_to_val(e, item[0]);
-	int ret;
+	int ret = 0;
 
-	if (nau8360->dsp_enable == dsp_en)
-		goto done;
-
+	snd_soc_dapm_mutex_lock(dapm);
 	if (snd_soc_component_get_bias_level(component) > SND_SOC_BIAS_STANDBY) {
-		dev_err(nau8360->dev, "changing path is not allowed during playback");
-		return -EINVAL;
+		dev_warn(nau8360->dev, "changing path is not allowed during playback");
+		snd_soc_dapm_mutex_unlock(dapm);
+		return ret;
 	}
 
-	ret = nau8360_dsp_switch(component, dsp_en);
-	if (ret)
-		goto err;
+	if (item[0] == NAU8360_DAC_SRC_DSP && !nau8360->load_fw_done) {
+		dev_warn(nau8360->dev, "Cannot enable DSP: Firmware not ready or disabled\n");
+		snd_soc_dapm_mutex_unlock(dapm);
+		return ret;
+	}
+	snd_soc_dapm_mutex_unlock(dapm);
 
 	ret = snd_soc_dapm_put_enum_double(kcontrol, ucontrol);
-	if (ret < 0)
-		goto err;
+	if (ret <= 0)
+		return ret;
 
-	nau8360->dsp_enable = dsp_en;
-done:
-	return 0;
-err:
-	nau8360_dsp_switch(component, !dsp_en);
+	nau8360_dsp_switch(component, snd_soc_enum_item_to_val(e, item[0]));
+
 	return ret;
 }
 
-/* HW1 MUX R12[9] if bypassing HW1 path */
+/* Select HW1 output source (enables PEQ bypass) */
 static const char *const nau8360_hw1out_src[] = { "Audio", "PEQ" };
 
 static SOC_ENUM_SINGLE_DECL(nau8360_hw1out_enum, NAU8360_R12_PATH_CTRL,
@@ -947,7 +1145,7 @@ static SOC_ENUM_SINGLE_DECL(nau8360_hw1out_enum, NAU8360_R12_PATH_CTRL,
 static const struct snd_kcontrol_new nau8360_hw1out_mux =
 	SOC_DAPM_ENUM("HW1 Output Source", nau8360_hw1out_enum);
 
-/* DSP MUX R12[5] if bypassing DSP path */
+/* Select DAC input source (enables DSP bypass) */
 static const char *const nau8360_dac_src[] = { "HW1", "DSP" };
 
 static SOC_ENUM_SINGLE_DECL(nau8360_dac_enum, NAU8360_R12_PATH_CTRL,
@@ -981,19 +1179,16 @@ static const struct snd_soc_dapm_widget nau8360_dapm_widgets[] = {
 		nau8360_hw2_event, SND_SOC_DAPM_POST_PMU),
 
 	SND_SOC_DAPM_SUPPLY("DAC Clock", NAU8360_R71_CLK_DIV_CFG, 9, 1, NULL, 0),
-	SND_SOC_DAPM_DAC_E("DACL", NULL, SND_SOC_NOPM, 0, 0,
-		nau8360_dacl_event, SND_SOC_DAPM_POST_PMD),
-	SND_SOC_DAPM_DAC_E("DACR", NULL, SND_SOC_NOPM, 0, 0,
-		nau8360_dacr_event, SND_SOC_DAPM_POST_PMD),
-	SND_SOC_DAPM_PGA_S("ADACL", 2, SND_SOC_NOPM, 0, 0,
-		nau8360_adacl_event, SND_SOC_DAPM_POST_PMU),
-	SND_SOC_DAPM_PGA_S("ADACR", 2, SND_SOC_NOPM, 0, 0,
-		nau8360_adacr_event, SND_SOC_DAPM_POST_PMU),
+	SND_SOC_DAPM_DAC_E("DACL", NULL, SND_SOC_NOPM, NAU8360_PD_DACL_SFT, 0,
+		nau8360_dac_power_event, SND_SOC_DAPM_POST_PMD),
+	SND_SOC_DAPM_DAC_E("DACR", NULL, SND_SOC_NOPM, NAU8360_PD_DACR_SFT, 0,
+		nau8360_dac_power_event, SND_SOC_DAPM_POST_PMD),
+	SND_SOC_DAPM_PGA_S("ADACL", 2, SND_SOC_NOPM, NAU8360_PD_DACL_SFT, 0,
+		nau8360_dac_power_event, SND_SOC_DAPM_POST_PMU),
+	SND_SOC_DAPM_PGA_S("ADACR", 2, SND_SOC_NOPM, NAU8360_PD_DACR_SFT, 0,
+		nau8360_dac_power_event, SND_SOC_DAPM_POST_PMU),
 	SND_SOC_DAPM_PGA_S("Class D", 3, SND_SOC_NOPM, 0, 0,
 		nau8360_hv_event, SND_SOC_DAPM_POST_PMU | SND_SOC_DAPM_POST_PMD),
-
-	SND_SOC_DAPM_PRE("Class D Pre", nau8360_hv_pre_event),
-	SND_SOC_DAPM_POST("Class D Post", nau8360_hv_post_event),
 
 	SND_SOC_DAPM_OUTPUT("OUTL"),
 	SND_SOC_DAPM_OUTPUT("OUTR"),
@@ -1029,16 +1224,30 @@ static const struct snd_soc_dapm_route nau8360_dapm_routes[] = {
 	{ "OUTR", NULL, "Class D" },
 };
 
-int nau8360_startup(struct snd_pcm_substream *substream, struct snd_soc_dai *dai)
+static int nau8360_startup(struct snd_pcm_substream *substream, struct snd_soc_dai *dai)
 {
 	struct snd_soc_component *component = dai->component;
 	struct nau8360 *nau8360 = snd_soc_component_get_drvdata(component);
+	unsigned int i2s_mask = NAU8360_FRAME_START_MASK | NAU8360_RX_OFFSET_MASK;
+	unsigned int i2s_fmt = NAU8360_FRAME_START_H2L | NAU8360_RX_OFFSET_I2S;
+	int val = 0;
 
-	regmap_update_bits(nau8360->regmap, NAU8360_R0B_I2S_PCM_CTRL1,
-		NAU8360_EN_TDM_TX | NAU8360_EN_TDM_RX,
-		NAU8360_EN_TDM_TX | NAU8360_EN_TDM_RX);
-	if (nau8360->dsp_enable && substream->stream == SNDRV_PCM_STREAM_PLAYBACK)
-		snd_soc_dapm_enable_pin(nau8360->dapm, "Sense");
+	flush_work(&nau8360->load_fw_work);
+
+	if (nau8360_dsp_active(component) && !nau8360->load_fw_done) {
+		dev_warn(nau8360->dev, "DSP firmware is not ready yet!");
+		return -EBUSY;
+	}
+
+	if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK) {
+		regmap_read(nau8360->regmap, NAU8360_R0B_I2S_PCM_CTRL1, &val);
+		if ((val & i2s_mask) == i2s_fmt)
+			regmap_update_bits(nau8360->regmap, NAU8360_R0B_I2S_PCM_CTRL1,
+				NAU8360_EN_TDM_RX, NAU8360_EN_TDM_RX);
+
+		if (nau8360_dsp_active(component))
+			snd_soc_dapm_enable_pin(nau8360->dapm, "Sense");
+	}
 
 	return 0;
 }
@@ -1048,10 +1257,14 @@ static void nau8360_shutdown(struct snd_pcm_substream *substream,
 {
 	struct snd_soc_component *component = dai->component;
 	struct nau8360 *nau8360 = snd_soc_component_get_drvdata(component);
+	unsigned int tdm_mask;
 
+	tdm_mask = (substream->stream == SNDRV_PCM_STREAM_PLAYBACK) ?
+		NAU8360_EN_TDM_RX : NAU8360_EN_TDM_TX;
 	regmap_update_bits(nau8360->regmap, NAU8360_R0B_I2S_PCM_CTRL1,
-		NAU8360_EN_TDM_TX | NAU8360_EN_TDM_RX, 0);
-	if (nau8360->dsp_enable && substream->stream == SNDRV_PCM_STREAM_PLAYBACK)
+		tdm_mask, 0);
+	if (nau8360_dsp_active(component) &&
+		substream->stream == SNDRV_PCM_STREAM_PLAYBACK)
 		snd_soc_dapm_disable_pin(nau8360->dapm, "Sense");
 }
 
@@ -1061,12 +1274,11 @@ static int nau8360_hw_params(struct snd_pcm_substream *substream,
 	struct snd_soc_component *component = dai->component;
 	struct nau8360 *nau8360 = snd_soc_component_get_drvdata(component);
 	unsigned int val_len, val_srate;
-	int ret, dlen = params_width(params);
+	int dlen = params_width(params);
 
-	if (dlen > nau8360->tdm_chan_len) {
+	if (dlen > nau8360_get_tdm_chan_len(nau8360)) {
 		dev_err(nau8360->dev, "Invalid data length");
-		ret = -EINVAL;
-		goto err;
+		return -EINVAL;
 	}
 
 	switch (dlen) {
@@ -1083,8 +1295,7 @@ static int nau8360_hw_params(struct snd_pcm_substream *substream,
 		val_len = NAU8360_TDM_DLEN_32;
 		break;
 	default:
-		ret = -EINVAL;
-		goto err;
+		return -EINVAL;
 	}
 
 	switch (params_rate(params)) {
@@ -1107,8 +1318,7 @@ static int nau8360_hw_params(struct snd_pcm_substream *substream,
 		val_srate = NAU8360_SRATE_192000;
 		break;
 	default:
-		ret = -EINVAL;
-		goto err;
+		return -EINVAL;
 	}
 
 	regmap_update_bits(nau8360->regmap, NAU8360_R0C_I2S_PCM_CTRL2,
@@ -1117,30 +1327,25 @@ static int nau8360_hw_params(struct snd_pcm_substream *substream,
 		NAU8360_SRATE_MASK, val_srate);
 
 	return 0;
-err:
-	return ret;
 }
 
 static int nau8360_set_fmt(struct snd_soc_dai *dai, unsigned int fmt)
 {
 	struct snd_soc_component *component = dai->component;
 	unsigned int ctrl_val, ctrl1_val;
-	int ret;
 
 	switch (fmt & SND_SOC_DAIFMT_MASTER_MASK) {
 	case SND_SOC_DAIFMT_CBC_CFC:
 		break;
 	default:
-		ret = -EINVAL;
-		goto err;
+		return -EINVAL;
 	}
 
 	switch (fmt & SND_SOC_DAIFMT_INV_MASK) {
 	case SND_SOC_DAIFMT_NB_NF:
 		break;
 	default:
-		ret = -EINVAL;
-		goto err;
+		return -EINVAL;
 	}
 
 	switch (fmt & SND_SOC_DAIFMT_FORMAT_MASK) {
@@ -1149,11 +1354,11 @@ static int nau8360_set_fmt(struct snd_soc_dai *dai, unsigned int fmt)
 		ctrl1_val = NAU8360_TX_OFFSET_I2S;
 		break;
 	case SND_SOC_DAIFMT_LEFT_J:
-		ctrl_val = NAU8360_FRAME_START_H2L | NAU8360_RX_OFFSET_LEFT;
+		ctrl_val = NAU8360_RX_OFFSET_LEFT | NAU8360_RX_LEFT_JUSTIFY;
 		ctrl1_val = NAU8360_TX_OFFSET_LEFT;
 		break;
 	case SND_SOC_DAIFMT_RIGHT_J:
-		ctrl_val = NAU8360_FRAME_START_H2L | NAU8360_RX_OFFSET_RIGHT;
+		ctrl_val = NAU8360_RX_OFFSET_RIGHT | NAU8360_RX_RIGHT_JUSTIFY;
 		ctrl1_val = NAU8360_TX_OFFSET_RIGHT;
 		break;
 	case SND_SOC_DAIFMT_DSP_A:
@@ -1165,21 +1370,43 @@ static int nau8360_set_fmt(struct snd_soc_dai *dai, unsigned int fmt)
 		ctrl1_val = NAU8360_TX_OFFSET_PCM_B;
 		break;
 	default:
-		ret = -EINVAL;
-		goto err;
+		return -EINVAL;
 	}
 
 	snd_soc_component_update_bits(component, NAU8360_R0B_I2S_PCM_CTRL1,
-		NAU8360_FRAME_START_MASK | NAU8360_RX_OFFSET_MASK, ctrl_val);
+		NAU8360_FRAME_START_MASK | NAU8360_RX_OFFSET_MASK |
+		NAU8360_RX_JUSTIFY_MASK, ctrl_val);
 	snd_soc_component_update_bits(component, NAU8360_R0D_I2S_PCM_CTRL3,
 		NAU8360_TX_OFFSET_MASK, ctrl1_val);
-
 	return 0;
-err:
-	return ret;
 }
 
-static int nau8360_set_tdm_tx_slot(struct snd_soc_component *cp, int type, int slot)
+static void nau8360_set_tdm_rx_slot(struct snd_soc_component *cp, int type, int slot)
+{
+	switch (type) {
+	case NAU8360_TDM_DACL:
+		snd_soc_component_update_bits(cp, NAU8360_R0C_I2S_PCM_CTRL2,
+			NAU8360_RX_DACL_MASK, slot);
+		break;
+
+	case NAU8360_TDM_DACR:
+		snd_soc_component_update_bits(cp, NAU8360_R0C_I2S_PCM_CTRL2,
+			NAU8360_RX_DACR_MASK, (slot << NAU8360_RX_DACR_SFT));
+		break;
+
+	case NAU8360_TDM_ANCL:
+		snd_soc_component_update_bits(cp, NAU8360_R10_I2S_DATA_CTRL3,
+			NAU8360_RX_ANC_L_MASK, (slot << NAU8360_RX_ANC_L_SFT));
+		break;
+
+	case NAU8360_TDM_ANCR:
+		snd_soc_component_update_bits(cp, NAU8360_R10_I2S_DATA_CTRL3,
+			NAU8360_RX_ANC_R_MASK, (slot << NAU8360_RX_ANC_R_SFT));
+		break;
+	}
+}
+
+static void nau8360_set_tdm_tx_slot(struct snd_soc_component *cp, int type, int slot)
 {
 	switch (type) {
 	case NAU8360_TDM_AECL:
@@ -1221,78 +1448,173 @@ static int nau8360_set_tdm_tx_slot(struct snd_soc_component *cp, int type, int s
 		snd_soc_component_update_bits(cp, NAU8360_R0F_I2S_DATA_CTRL2,
 			NAU8360_VBAT_SLOT_MASK, slot << NAU8360_VBAT_SLOT_SFT);
 		break;
+	}
+}
 
-	default:
-		return -EINVAL;
+static void nau8360_set_tdm_tx_func(struct snd_soc_component *cp, int type, bool enable)
+{
+	switch (type) {
+	case NAU8360_TDM_AECL:
+		snd_soc_component_update_bits(cp, NAU8360_R17_I2S0_DATA_CTRL5,
+			NAU8360_AEC_L_EN, enable ? NAU8360_AEC_L_EN : 0);
+		break;
+	case NAU8360_TDM_AECR:
+		snd_soc_component_update_bits(cp, NAU8360_R17_I2S0_DATA_CTRL5,
+			NAU8360_AEC_R_EN, enable ? NAU8360_AEC_R_EN : 0);
+		break;
+	case NAU8360_TDM_ISNSL:
+		snd_soc_component_update_bits(cp, NAU8360_R0E_I2S_DATA_CTRL1,
+			NAU8360_ISNS_L_TX_EN, enable ? NAU8360_ISNS_L_TX_EN : 0);
+		break;
+	case NAU8360_TDM_ISNSR:
+		snd_soc_component_update_bits(cp, NAU8360_R11_I2S_DATA_CTRL4,
+			NAU8360_ISNS_R_TX_EN, enable ? NAU8360_ISNS_R_TX_EN : 0);
+		break;
+	case NAU8360_TDM_VSNSL:
+		snd_soc_component_update_bits(cp, NAU8360_R0D_I2S_PCM_CTRL3,
+			NAU8360_VSNS_L_TX_EN, enable ? NAU8360_VSNS_L_TX_EN : 0);
+		break;
+	case NAU8360_TDM_VSNSR:
+		snd_soc_component_update_bits(cp, NAU8360_R11_I2S_DATA_CTRL4,
+			NAU8360_VSNS_R_TX_EN, enable ? NAU8360_VSNS_R_TX_EN : 0);
+		break;
+	case NAU8360_TDM_TJ:
+		snd_soc_component_update_bits(cp, NAU8360_R10_I2S_DATA_CTRL3,
+			NAU8360_TEMP_TX_EN, enable ? NAU8360_TEMP_TX_EN : 0);
+		break;
+	case NAU8360_TDM_VBAT:
+		snd_soc_component_update_bits(cp, NAU8360_R0F_I2S_DATA_CTRL2,
+			NAU8360_VBAT_TX_EN, enable ? NAU8360_VBAT_TX_EN : 0);
+		break;
+	}
+}
+
+static int nau8360_validate_tdm_slots(struct device *dev, unsigned int mask,
+	const u32 *func_slots, const char * const *func_names,
+	int num_funcs, const char *dir,
+	unsigned int *slot_used)
+{
+	int i;
+	unsigned int func_slot;
+	*slot_used = 0;
+
+	if (!mask)
+		return 0;
+
+	for (i = 0; i < num_funcs; i++) {
+		func_slot = func_slots[i];
+		if (func_slot == TDM_SLOT_NONE) {
+			dev_warn(dev, "%s %s slot disabled",
+				dir, func_names[i]);
+			continue;
+		}
+
+		if (!(mask & BIT(func_slot))) {
+			dev_warn(dev, "%s %s mapped to slot %d, but disabled by mask!",
+				dir, func_names[i], func_slot);
+			continue;
+		}
+
+		if (*slot_used & BIT(func_slot)) {
+			dev_err(dev, "%s %s slot %d collision!",
+				dir, func_names[i], func_slot);
+			return -EINVAL;
+		}
+
+		*slot_used |= BIT(func_slot);
 	}
 
 	return 0;
 }
 
-/**
- * nau8360_set_tdm_slot - configure DAI TDM.
- * @tx_mask: 4-bits value representing each active TX slots. Range: 0 (skip), 1~8. Ex.
- *	bit 0-3 for left AEC output channel selection
- *	bit 4-7 for right AEC output channel selection
- *	bit 8-11 for left Isense output channel selection
- *	bit 12-15 for right Isense output channel selection
- *	bit 16-19 for left Vsense output channel selection
- *	bit 20-23 for right Vsense output channel selection
- *	bit 24-27 for Junction Temperature (Tj) data output channel selection
- *	bit 28-31 for VBAT measured data output channel selection
- * @rx_mask: Bitmask representing active RX slots. Ex.
- *	bit 0-7 for left DAC channel source selection
- *	bit 8-15 for right DAC channel source selection
- *	bit 16-23 for left ANC channel source selection
- *	bit 24-31 for right ANC channel source selection
- *
- * Configures a DAI for TDM operation. Only support 8 slots TDM.
- */
+static void nau8360_enable_tdm_channels(struct snd_soc_component *cp,
+	int rx_slot_used, int tx_slot_used)
+{
+	struct nau8360 *nau8360 = snd_soc_component_get_drvdata(cp);
+	int i, slot;
+	unsigned int val = 0;
+	bool enable;
+
+	for (i = 0; i < NAU8360_TDM_TXN; i++) {
+		slot = nau8360->tdm_tx_func_slot[i];
+		enable = (slot != TDM_SLOT_NONE) && (tx_slot_used & BIT(slot));
+		nau8360_set_tdm_tx_func(cp, i, enable);
+	}
+
+	if (rx_slot_used)
+		val |= NAU8360_EN_TDM_RX;
+	if (tx_slot_used)
+		val |= NAU8360_EN_TDM_TX;
+
+	snd_soc_component_update_bits(cp, NAU8360_R0B_I2S_PCM_CTRL1,
+		NAU8360_EN_TDM_RX | NAU8360_EN_TDM_TX, val);
+}
+
+static void nau8360_tdm_apply(struct snd_soc_component *cp, int slot_width)
+{
+	struct nau8360 *nau8360 = snd_soc_component_get_drvdata(cp);
+	int i, chan_tx;
+
+	for (i = 0; i < NAU8360_TDM_TXN; i++) {
+		if (nau8360->tdm_tx_func_slot[i] == TDM_SLOT_NONE)
+			continue;
+
+		/* compute the slot location in bytes according to slot/chan width */
+		chan_tx = (slot_width >> 3) * nau8360->tdm_tx_func_slot[i];
+		nau8360_set_tdm_tx_slot(cp, i, chan_tx);
+	}
+
+	regmap_update_bits(nau8360->regmap, NAU8360_R0C_I2S_PCM_CTRL2,
+		NAU8360_TDM_CLEN_MASK,
+		((slot_width - 16) >> 3) << NAU8360_TDM_CLEN_SFT);
+}
+
 static int nau8360_set_tdm_slot(struct snd_soc_dai *dai, unsigned int tx_mask,
 	unsigned int rx_mask, int slots, int slot_width)
 {
 	struct snd_soc_component *cp = dai->component;
+	struct device *dev = cp->dev;
 	struct nau8360 *nau8360 = snd_soc_component_get_drvdata(cp);
-	int ret, i, slot_scale, chan[NAU8360_TDM_RXN], chan_tx;
-	unsigned int mask;
+	unsigned int tx_slot_used = 0, rx_slot_used = 0;
+	int ret = 0;
 
-	slot_scale = nau8360->tdm_chan_len >> 3;
-	for (i = 0; i < NAU8360_TDM_TXN; i++) {
-		mask = (tx_mask >> (i * 4)) & 0xf;
-		if (!mask)
-			continue;
-		else if (mask > NAU8360_TDM_MAX_CHAN) {
-			dev_err(cp->dev, "Invalid channel on TDM TX %d", i);
-			ret = -EINVAL;
-			goto err;
-		}
-		/* compute the slot location in bytes according to slot/chan width */
-		chan_tx = slot_scale * (mask - 1);
-		ret = nau8360_set_tdm_tx_slot(cp, i, chan_tx);
-		if (ret)
-			goto err;
+	if (!slots || !slot_width) {
+		nau8360_enable_tdm_channels(cp, 0, 0);
+		return ret;
 	}
 
-	for (i = 0; i < NAU8360_TDM_RXN; i++) {
-		mask = (rx_mask >> (i * 8)) & 0xff;
-		if (hweight_long(mask) != 1) {
-			dev_err(cp->dev, "Invalid channel on TDM RX %d", i);
-			ret = -EINVAL;
-			goto err;
-		}
-		chan[i] = ffs(mask) - 1;
+	if (slots > NAU8360_TDM_MAX_CHAN) {
+		dev_err(dev, "Invalid TDM slots: %d", slots);
+		return -EINVAL;
 	}
-	snd_soc_component_update_bits(cp, NAU8360_R10_I2S_DATA_CTRL3,
-		NAU8360_RX_ANC_R_MASK | NAU8360_RX_ANC_L_MASK,
-		(chan[NAU8360_TDM_ANCR] << NAU8360_RX_ANC_R_SFT) |
-		(chan[NAU8360_TDM_ANCL] << NAU8360_RX_ANC_L_SFT));
-	snd_soc_component_update_bits(cp, NAU8360_R0C_I2S_PCM_CTRL2,
-		NAU8360_RX_DACL_MASK | NAU8360_RX_DACR_MASK, chan[NAU8360_TDM_DACL] |
-		(chan[NAU8360_TDM_DACR] << NAU8360_RX_DACR_SFT));
 
-	dev_dbg(cp->dev, "TDM: tx_mask 0x%08X, rx_mask 0x%08X", tx_mask, rx_mask);
+	if (slot_width != 16 && slot_width != 24 && slot_width != 32) {
+		dev_err(dev, "Invalid TDM channel length: %d", slot_width);
+		return -EINVAL;
+	}
 
-	return 0;
+	ret = nau8360_validate_tdm_slots(cp->dev, rx_mask,
+		nau8360->tdm_rx_func_slot,
+		nau8360_rx_func_names,
+		NAU8360_TDM_RXN, "RX",
+		&rx_slot_used);
+	if (ret < 0)
+		goto err;
+
+	ret = nau8360_validate_tdm_slots(cp->dev, tx_mask,
+		nau8360->tdm_tx_func_slot,
+		nau8360_tx_func_names,
+		NAU8360_TDM_TXN, "TX",
+		&tx_slot_used);
+	if (ret < 0)
+		goto err;
+
+	if (nau8360_get_tdm_chan_len(nau8360) != slot_width)
+		nau8360_tdm_apply(cp, slot_width);
+
+	nau8360_enable_tdm_channels(cp, rx_slot_used, tx_slot_used);
+
+	dev_dbg(dev, "TDM: tx_mask 0x%x, rx_mask 0x%x", tx_mask, rx_mask);
 err:
 	return ret;
 }
@@ -1300,6 +1622,9 @@ err:
 static inline int dyn_clk_div(int div_max, int fin, int fout)
 {
 	int clk_div;
+
+	if (!fin || !fout)
+		return -EINVAL;
 
 	for (clk_div = 0; clk_div <= div_max; clk_div++)
 		if (fin / (clk_div + 1) <= fout)
@@ -1314,6 +1639,9 @@ static inline int tab_clk_div(const int clk_div[], int num_div, int fin)
 {
 	int i;
 
+	if (!fin)
+		return -EINVAL;
+
 	for (i = 0; i < num_div; i++)
 		if ((fin / clk_div[i]) <= CLK_DA_IVSNS_MAX)
 			break;
@@ -1325,19 +1653,18 @@ static inline int tab_clk_div(const int clk_div[], int num_div, int fin)
 
 static int nau8360_set_sysclk_output(struct nau8360 *nau8360, unsigned int freq)
 {
+	struct device *dev = nau8360->dev;
 	int ratio = 0, mclk_rate;
 
 	if (freq < MASTER_CLK_MIN || freq > MASTER_CLK_MAX) {
-		dev_err(nau8360->dev, "system clock %d Hz exceed range", freq);
-		goto err;
+		dev_err(dev, "system clock %d Hz exceed range", freq);
+		return -EINVAL;
 	}
 
 	if (freq % ADSP_SR_48000 == 0)
 		ratio = freq / ADSP_SR_48000;
 	else if (freq % ADSP_SR_44100 == 0)
 		ratio = freq / ADSP_SR_44100;
-	else
-		goto err;
 
 	switch (ratio) {
 	case NAU8360_MCLK_FS_RATIO_250:
@@ -1356,19 +1683,17 @@ static int nau8360_set_sysclk_output(struct nau8360 *nau8360, unsigned int freq)
 		mclk_rate = NAU8360_MCLK_RATE_24576;
 		break;
 	default:
-		dev_err(nau8360->dev, "invalid sysclk %d", freq);
-		goto err;
+		dev_err(dev, "invalid sysclk %d", freq);
+		return -EINVAL;
 	}
 
-	dev_dbg(nau8360->dev, " sysclk %d Hz, ratio %d", freq, ratio);
+	dev_dbg(dev, "sysclk %d Hz, ratio %d", freq, ratio);
 
 	nau8360->sys_clk = freq;
 	regmap_update_bits(nau8360->regmap, NAU8360_R40_CLK_DET_CTRL,
 		NAU8360_MCLK_RATE_MASK, mclk_rate);
 
 	return 0;
-err:
-	return -EINVAL;
 }
 
 static int nau8360_dig_sys_clk(struct nau8360 *nau8360, int source, unsigned int freq)
@@ -1377,27 +1702,25 @@ static int nau8360_dig_sys_clk(struct nau8360 *nau8360, int source, unsigned int
 	struct regmap *regmap = nau8360->regmap;
 	int value, mclk_div;
 
-	if (source == NAU8360_CLK_SRC_ICLK) {
-		/* switch HIRC and clock down to 12MHz  */
-		regmap_update_bits(regmap, NAU8360_R04_CLK_CTRL1, NAU8360_MCLK_SEL_MASK,
-			NAU8360_MCLK_SEL_HIRC48M);
-		regmap_update_bits(regmap, NAU8360_R03_CLK_CTRL0,
-			NAU8360_MCLK_DIV_MASK, 0x3 << NAU8360_MCLK_DIV_SFT);
-		return 0;
+	switch (source) {
+	case NAU8360_CLK_SRC_MCLK:
+		value = NAU8360_MCLK_SEL_MCLK;
+		break;
+
+	case NAU8360_CLK_SRC_PLL:
+		value = NAU8360_MCLK_SEL_PLL;
+		break;
+
+	default:
+		return -EINVAL;
 	}
 
-	if (source == NAU8360_CLK_SRC_MCLK)
-		value = NAU8360_MCLK_SEL_MCLK;
-	else if (source == NAU8360_CLK_SRC_PLL)
-		value = NAU8360_MCLK_SEL_PLL;
-	else
-		goto err;
 	regmap_update_bits(regmap, NAU8360_R04_CLK_CTRL1, NAU8360_MCLK_SEL_MASK, value);
 
 	mclk_div = dyn_clk_div(NAU8360_MCLK_DIV_MAX, freq, nau8360->sys_clk);
 	if (mclk_div < 0) {
 		dev_err(dev, "mclk_div (%d -> %d):  error", freq, nau8360->sys_clk);
-		goto err;
+		return -EINVAL;
 	}
 	regmap_update_bits(regmap, NAU8360_R03_CLK_CTRL0, NAU8360_MCLK_DIV_MASK,
 		mclk_div << NAU8360_MCLK_DIV_SFT);
@@ -1405,8 +1728,6 @@ static int nau8360_dig_sys_clk(struct nau8360 *nau8360, int source, unsigned int
 	dev_dbg(dev, " mclk_div (%d -> %d): %d", freq, nau8360->sys_clk, mclk_div + 1);
 
 	return 0;
-err:
-	return -EINVAL;
 }
 
 static int nau8360_ana_sys_clk(struct nau8360 *nau8360, int source, unsigned int freq)
@@ -1416,21 +1737,26 @@ static int nau8360_ana_sys_clk(struct nau8360 *nau8360, int source, unsigned int
 	struct nau8360_pll *pll = &nau8360->pll;
 	int value, pclk_div, ivdiv_sel, ddiv_sel;
 
-	if (source == NAU8360_CLK_SRC_PLL)
+	switch (source) {
+	case NAU8360_CLK_SRC_PLL:
 		value = NAU8360_CLK_ANA_SEL_PLL;
-	else if (source == NAU8360_CLK_SRC_MCLK)
+		break;
+	case NAU8360_CLK_SRC_MCLK:
 		value = NAU8360_CLK_ANA_SEL_MCLK;
-	else if (source == NAU8360_CLK_SRC_BCLK)
+		break;
+	case NAU8360_CLK_SRC_BCLK:
 		value = NAU8360_CLK_ANA_SEL_BCLK;
-	else
-		goto err;
+		break;
+	default:
+		return -EINVAL;
+	}
 
 	if (source == NAU8360_CLK_SRC_PLL) {
 		freq = pll->output;
 		pclk_div = dyn_clk_div(NAU8360_PLLOUT_DIV_MAX, freq, nau8360->sys_clk);
 		if (pclk_div < 0) {
 			dev_err(dev, "pll_div (%d -> %d): error", freq, nau8360->sys_clk);
-			goto err;
+			return -EINVAL;
 		}
 
 		dev_dbg(dev, " pll_div (%d -> %d): %d", freq, nau8360->sys_clk, pclk_div + 1);
@@ -1443,14 +1769,14 @@ static int nau8360_ana_sys_clk(struct nau8360 *nau8360, int source, unsigned int
 	ivdiv_sel = tab_clk_div(ivsns_clk_div, ARRAY_SIZE(ivsns_clk_div), freq);
 	if (ivdiv_sel < 0) {
 		dev_err(dev, "iv_div (%d -> %d): error", freq, CLK_DA_IVSNS_MAX);
-		goto err;
+		return -EINVAL;
 	}
 	value |= ivdiv_sel << NAU8360_IVSNS_CLK_DIV_SFT;
 
 	ddiv_sel = tab_clk_div(dac_clk_div, ARRAY_SIZE(dac_clk_div), freq);
 	if (ddiv_sel < 0) {
 		dev_err(dev, "dac_div (%d -> %d): error", freq, CLK_DA_IVSNS_MAX);
-		goto err;
+		return -EINVAL;
 	}
 	value |= ddiv_sel << NAU8360_DAC_CLK_DIV_SFT;
 
@@ -1461,8 +1787,6 @@ static int nau8360_ana_sys_clk(struct nau8360 *nau8360, int source, unsigned int
 		NAU8360_IVSNS_CLK_DIV_MASK | NAU8360_DAC_CLK_DIV_MASK, value);
 
 	return 0;
-err:
-	return -EINVAL;
 }
 
 static int nau8360_dsp_hw_clk(struct nau8360 *nau8360, int source, unsigned int freq)
@@ -1471,27 +1795,16 @@ static int nau8360_dsp_hw_clk(struct nau8360 *nau8360, int source, unsigned int 
 	struct regmap *regmap = nau8360->regmap;
 	int val_dsp, val_hw, clk_div, dsp_clk;
 
-	if (source == NAU8360_CLK_SRC_ICLK) {
-		/* switch HIRC and clock down to 12MHz  */
-		regmap_update_bits(regmap, NAU8360_R03_CLK_CTRL0,
-			NAU8360_DSP_CLK_SEL_MASK | NAU8360_DSP_CLK_DIV_MASK,
-			NAU8360_DSP_CLK_SEL_HIRC48M | 0x3 << NAU8360_DSP_CLK_DIV_SFT);
-		regmap_update_bits(regmap, NAU8360_R04_CLK_CTRL1,
-			NAU8360_HW_CLK_SEL_MASK | NAU8360_HW_CLK_DIV_MASK,
-			NAU8360_HW_CLK_SEL_HIRC48M | 0x3 << NAU8360_HW_CLK_DIV_SFT);
-		return 0;
-	}
-
-	if (nau8360->sys_clk % ADSP_SR_48000 == 0)
+	if (freq % ADSP_SR_48000 == 0)
 		dsp_clk = DSP_OP_CLK48;
 	else if (freq % ADSP_SR_44100 == 0)
 		dsp_clk = DSP_OP_CLK44;
 	else
-		goto err;
+		return -EINVAL;
 	clk_div = dyn_clk_div(NAU8360_DSP_CLK_DIV_MAX, freq, dsp_clk);
 	if (clk_div < 0) {
 		dev_err(dev, "dsp/hw clk_div (%d -> %d): error", freq, dsp_clk);
-		goto err;
+		return -EINVAL;
 	}
 	val_dsp = clk_div << NAU8360_DSP_CLK_DIV_SFT;
 	val_hw = clk_div << NAU8360_HW_CLK_DIV_SFT;
@@ -1502,7 +1815,7 @@ static int nau8360_dsp_hw_clk(struct nau8360 *nau8360, int source, unsigned int 
 		val_dsp |= NAU8360_DSP_CLK_SEL_PLL;
 		val_hw |= NAU8360_HW_CLK_SEL_PLL;
 	} else
-		goto err;
+		return -EINVAL;
 
 	dev_dbg(dev, " dsp/hw clk_div (%d -> %d): %d", freq, dsp_clk, clk_div + 1);
 
@@ -1512,95 +1825,94 @@ static int nau8360_dsp_hw_clk(struct nau8360 *nau8360, int source, unsigned int 
 		NAU8360_HW_CLK_DIV_MASK, val_hw);
 
 	return 0;
-err:
-	return -EINVAL;
 }
 
-static int nau8360_set_sysclk(struct snd_soc_component *component,
+static int nau8360_set_sysclk(struct snd_soc_component *cp,
 	int clk_id, int source, unsigned int freq, int dir)
 {
-	struct nau8360 *nau8360 = snd_soc_component_get_drvdata(component);
+	struct nau8360 *nau8360 = snd_soc_component_get_drvdata(cp);
+	struct regmap *regmap = nau8360->regmap;
+	struct device *dev = nau8360->dev;
 	static const char * const idtab[] = { "DIG", "ANA", "Internal" };
 	static const char * const srctab[] = { "MCLK", "PLL", "HIRC48M", "BCLK" };
 	int ret;
 
+	if (clk_id < 0 || clk_id >= ARRAY_SIZE(idtab))
+		return -EINVAL;
+
+	if (source < 0 || source >= ARRAY_SIZE(srctab))
+		return -EINVAL;
+
 	if (dir == SND_SOC_CLOCK_OUT) {
-		dev_dbg(nau8360->dev, "sysclk: freq %d (out)", freq);
+		dev_dbg(dev, "sysclk: freq %d (out)", freq);
 		return nau8360_set_sysclk_output(nau8360, freq);
 	}
 
 	switch (clk_id) {
 	case NAU8360_CLK_ID_INT:
 		source = NAU8360_CLK_SRC_ICLK;
-		dev_dbg(nau8360->dev, "sysclk: id %d (%s), src %d (%s) (in)",
+		dev_dbg(dev, "sysclk: id %d (%s), src %d (%s) (in)",
 			clk_id, idtab[clk_id], source, srctab[source]);
-
-		nau8360_dsp_hw_clk(nau8360, source, 0);
-		nau8360_dig_sys_clk(nau8360, source, 0);
-
-		regmap_update_bits(nau8360->regmap, NAU8360_R72_PLL_CFG0,
+		regmap_update_bits(regmap, NAU8360_R03_CLK_CTRL0,
+			NAU8360_DSP_CLK_SEL_MASK, NAU8360_DSP_CLK_SEL_HIRC48M);
+		regmap_update_bits(regmap, NAU8360_R04_CLK_CTRL1,
+			NAU8360_HW_CLK_SEL_MASK | NAU8360_MCLK_SEL_MASK,
+			NAU8360_HW_CLK_SEL_HIRC48M | NAU8360_MCLK_SEL_HIRC48M);
+		regmap_update_bits(regmap, NAU8360_R72_PLL_CFG0,
 			NAU8360_PD_PLL_MASK, NAU8360_PD_PLL_DIS);
 		break;
 
 	case NAU8360_CLK_ID_DIG:
-		dev_dbg(nau8360->dev, "sysclk: id %d (%s), src %d (%s), freq %d (in)",
+		dev_dbg(dev, "sysclk: id %d (%s), src %d (%s), freq %d (in)",
 			clk_id, idtab[clk_id], source, srctab[source], freq);
 
-		if (source == NAU8360_CLK_SRC_BCLK) {
-			ret = -EINVAL;
-			goto err;
-		}
+		if (source == NAU8360_CLK_SRC_BCLK)
+			return -EINVAL;
+
 		if (source == NAU8360_CLK_SRC_MCLK)
-			regmap_update_bits(nau8360->regmap, NAU8360_R72_PLL_CFG0,
+			regmap_update_bits(regmap, NAU8360_R72_PLL_CFG0,
 				NAU8360_PD_PLL_MASK, NAU8360_PD_PLL_DIS);
 
 		ret = nau8360_dig_sys_clk(nau8360, source, freq);
 		if (ret)
-			goto err;
+			return -EINVAL;
 		ret = nau8360_dsp_hw_clk(nau8360, source, freq);
 		if (ret)
-			goto err;
+			return -EINVAL;
 		break;
 
 	case NAU8360_CLK_ID_ANA:
-		dev_dbg(nau8360->dev, "sysclk: id %d (%s), src %d (%s), freq %d (in)",
+		dev_dbg(dev, "sysclk: id %d (%s), src %d (%s), freq %d (in)",
 			clk_id, idtab[clk_id], source, srctab[source], freq);
 
 		if (source == NAU8360_CLK_SRC_MCLK || source == NAU8360_CLK_SRC_BCLK)
-			regmap_update_bits(nau8360->regmap, NAU8360_R72_PLL_CFG0,
+			regmap_update_bits(regmap, NAU8360_R72_PLL_CFG0,
 				NAU8360_PD_PLL_MASK, NAU8360_PD_PLL_DIS);
 
 		ret = nau8360_ana_sys_clk(nau8360, source, freq);
 		if (ret)
-			goto err;
+			return -EINVAL;
 		break;
 
 	default:
-		ret = -EINVAL;
-		goto err;
+		return -EINVAL;
 	}
 
 	return 0;
-err:
-	return ret;
 }
 
 static int nau8360_calc_pll(struct nau8360 *nau8360)
 {
 	struct nau8360_pll *pll = &nau8360->pll;
 	u64 fref = 0ULL, fvco = 0ULL, ratio;
-	int ret, fr, fv;
+	int fr, fv;
 
 	if (pll->src != NAU8360_PLL_INTERNAL &&
-		(pll->input > PLL_FREQ_MAX || pll->input < PLL_FREQ_MIN)) {
-		ret = -EINVAL;
-		goto err;
-	}
+		(pll->input > PLL_FREQ_MAX || pll->input < PLL_FREQ_MIN))
+		return -EINVAL;
 
-	if (pll->output > PLL_FOUT_MAX || pll->output < PLL_FOUT_MIN) {
-		ret = -EINVAL;
-		goto err;
-	}
+	if (pll->output > PLL_FOUT_MAX || pll->output < PLL_FOUT_MIN)
+		return -EINVAL;
 
 	for (pll->msel = 1; pll->msel <= MSEL_MAX; pll->msel++) {
 		fr = pll->input / pll->msel;
@@ -1609,10 +1921,8 @@ static int nau8360_calc_pll(struct nau8360 *nau8360)
 			break;
 		}
 	}
-	if (!fref) {
-		ret = -ERANGE;
-		goto err;
-	}
+	if (!fref)
+		return -ERANGE;
 
 	for (pll->rsel = 1; pll->rsel <= RSEL_MAX; pll->rsel++) {
 		fv = pll->output * pll->rsel;
@@ -1621,10 +1931,8 @@ static int nau8360_calc_pll(struct nau8360 *nau8360)
 			break;
 		}
 	}
-	if (!fvco) {
-		ret = -ERANGE;
-		goto err;
-	}
+	if (!fvco)
+		return -ERANGE;
 
 	dev_dbg(nau8360->dev, "fref(1-8MHz): %lld, fvco(50-125MHz): %lld", fref, fvco);
 
@@ -1634,26 +1942,25 @@ static int nau8360_calc_pll(struct nau8360 *nau8360)
 	pll->xsel = ratio & 0xfff;
 
 	return 0;
-err:
-	return ret;
 }
 
 static int nau8360_set_pll(struct snd_soc_component *cp, int pll_id, int source,
 	unsigned int freq_in, unsigned int freq_out)
 {
 	struct nau8360 *nau8360 = snd_soc_component_get_drvdata(cp);
+	struct device *dev = nau8360->dev;
 	struct nau8360_pll *pll = &nau8360->pll;
-	int ctrl0_val, ret;
+	int ctrl_val, ret;
 
 	switch (source) {
 	case NAU8360_PLL_MCLK:
-		ctrl0_val = NAU8360_PLL_CLK_SEL_MCLK;
+		ctrl_val = NAU8360_PLL_CLK_SEL_MCLK;
 		break;
 	case NAU8360_PLL_BCLK:
-		ctrl0_val = NAU8360_PLL_CLK_SEL_BCLK;
+		ctrl_val = NAU8360_PLL_CLK_SEL_BCLK;
 		break;
 	case NAU8360_PLL_INTERNAL:
-		ctrl0_val = NAU8360_PLL_CLK_SEL_HIRC;
+		ctrl_val = NAU8360_PLL_CLK_SEL_HIRC;
 		break;
 	default:
 		return -EINVAL;
@@ -1663,14 +1970,14 @@ static int nau8360_set_pll(struct snd_soc_component *cp, int pll_id, int source,
 	pll->output = freq_out;
 	ret = nau8360_calc_pll(nau8360);
 	if (ret) {
-		dev_err(cp->dev, "clock error input %d output %d", freq_in, freq_out);
+		dev_err(dev, "clock error input %d output %d", freq_in, freq_out);
 		return ret;
 	}
-	dev_dbg(cp->dev, "src:%d, input:%d, output:%d, M:%d, R:%d, N:%d, X:%d", pll->src,
+	dev_dbg(dev, "src:%d, input:%d, output:%d, M:%d, R:%d, N:%d, X:%d", pll->src,
 		pll->input, pll->output, pll->msel, pll->rsel, pll->nsel, pll->xsel);
 
 	regmap_update_bits(nau8360->regmap, NAU8360_R72_PLL_CFG0, NAU8360_PD_PLL_MASK |
-		NAU8360_PLL_CLK_SEL_MASK, NAU8360_PD_PLL_EN | ctrl0_val);
+		NAU8360_PLL_CLK_SEL_MASK, NAU8360_PD_PLL_EN | ctrl_val);
 	regmap_write_bits(nau8360->regmap, NAU8360_R73_PLL_CFG1,
 		NAU8360_RSEL_MASK | NAU8360_MSEL_MASK | NAU8360_NSEL_MASK,
 		(pll->rsel - 1) << NAU8360_RSEL_SFT |
@@ -1681,50 +1988,129 @@ static int nau8360_set_pll(struct snd_soc_component *cp, int pll_id, int source,
 	return 0;
 }
 
-static void nau8360_coeff_set_def(struct regmap *regmap)
+static void nau8360_coeff_set_def(struct nau8360 *nau8360)
 {
+	struct regmap *regmap = nau8360->regmap;
 	int i;
 
-	regmap_update_bits(regmap, NAU8360_R9D_PEQ_CTL, NAU8360_HW1_MEM_TEST,
-		NAU8360_HW1_MEM_TEST);
+	mutex_lock(&nau8360->lock);
+	regmap_update_bits(regmap, NAU8360_R9D_PEQ_CTL, NAU8360_HW1_MEM_CLEAR,
+		NAU8360_HW1_MEM_CLEAR);
+	regmap_update_bits(regmap, NAU8360_R9D_PEQ_CTL, NAU8360_HW1_MEM_CLEAR, 0);
+	nau8360_peq_mem_enable(regmap, true);
 	for (i = 0; i < NAU8360_TOT_BAND_PER_CH; i++) {
 		regmap_write(regmap, NAU8360_R100_LEFT_BIQ0_COE + 1 +
 			i * NAU8360_TOT_BAND_COE_RANGE, 0x20);
 		regmap_write(regmap, NAU8360_R200_RIGHT_BIQ0_COE + 1 +
 			i * NAU8360_TOT_BAND_COE_RANGE, 0x20);
 	}
-	regmap_update_bits(regmap, NAU8360_R9D_PEQ_CTL, NAU8360_HW1_MEM_TEST, 0);
+	nau8360_peq_mem_enable(regmap, false);
+	regmap_update_bits(regmap, NAU8360_R9D_PEQ_CTL, NAU8360_PEQ_BAND_MASK,
+		NAU8360_PEQ_BAND_8);
+	mutex_unlock(&nau8360->lock);
 }
 
-static inline int nau8360_vbat_level(struct regmap *regmap)
+static inline int nau8360_vbat_level(struct regmap *regmap, int *vbat)
 {
-	int value;
+	struct device *dev = regmap_get_device(regmap);
+	int value = 0, ret;
 
-	regmap_read(regmap, NAU8360_R21_VBAT_READOUT, &value);
+	ret = regmap_read(regmap, NAU8360_R21_VBAT_READOUT, &value);
+	if (ret)
+		return ret;
+
 	/* multiple 100 on value scale */
-	return (value * 100 + NAU8360_VBAT_BASE) / NAU8360_VBAT_STEP;
+	*vbat = (value * 100 + NAU8360_VBAT_BASE) / NAU8360_VBAT_STEP;
+	if (*vbat < NAU8360_VBAT_MIN || *vbat > NAU8360_VBAT_MAX) {
+		dev_err(dev, "VBAT %dV is out of valid range (%dV-%dV)",
+			*vbat, NAU8360_VBAT_MIN, NAU8360_VBAT_MAX);
+		return -ERANGE;
+	}
+
+	return 0;
 }
 
-static inline int nau8360_sawtooth_params(int vbat, int *vsaw_level, int *vsaw_slope)
+static inline void nau8360_sawtooth_params(int vbat, int *vsaw_level, int *vsaw_slope)
 {
-	if (!vsaw_level || !vsaw_slope)
-		return -EINVAL;
-
-	if (vbat > 24 || vbat < 8)
-		return -ERANGE;
-
-	if (vbat < 13) {
+	if (vbat < NAU8360_VBAT_MID_THRES) {
 		*vsaw_level = 0x1;
 		*vsaw_slope = 0x0;
-	} else if (vbat < 19) {
+	} else if (vbat < NAU8360_VBAT_HIGH_THRES) {
 		*vsaw_level = 0x2;
 		*vsaw_slope = 0x1;
 	} else {
 		*vsaw_level = 0x3;
 		*vsaw_slope = 0x2;
 	}
+}
 
-	return 0;
+static inline void nau8360_dsp_software_reset(struct snd_soc_component *component)
+{
+	/* Enable PLL for successful DSP reset. After DSP is alive,
+	 * system clock switches to internal clock and disable PLL.
+	 */
+	snd_soc_component_update_bits(component, NAU8360_R72_PLL_CFG0,
+		NAU8360_PD_PLL_MASK, NAU8360_PD_PLL_EN);
+	msleep(50);
+	snd_soc_component_write(component, NAU8360_R01_DSP_SOFTWARE_RST, 0x5a5a);
+	snd_soc_component_write(component, NAU8360_R01_DSP_SOFTWARE_RST, 0xa5a5);
+	snd_soc_component_set_sysclk(component, NAU8360_CLK_ID_INT, 0, 0,
+		SND_SOC_CLOCK_IN);
+}
+
+static void nau8360_dsp_bootup(struct snd_soc_component *component)
+{
+	struct nau8360 *nau8360 = snd_soc_component_get_drvdata(component);
+	struct regmap *regmap = nau8360->regmap;
+
+	regmap_update_bits(regmap, NAU8360_R90_HW2_CTL0, NAU8360_HW2_STALL, 0);
+	nau8360_dsp_software_reset(component);
+	nau8360_dsp_enable(regmap, true);
+}
+
+static void nau8360_tdm_function_config(struct snd_soc_component *cp)
+{
+	struct nau8360 *nau8360 = snd_soc_component_get_drvdata(cp);
+	int i, chan_tx, tdm_chan_len;
+
+	for (i = 0; i < NAU8360_TDM_RXN; i++) {
+		if (nau8360->tdm_rx_func_slot[i] == TDM_SLOT_NONE)
+			continue;
+
+		nau8360_set_tdm_rx_slot(cp, i, nau8360->tdm_rx_func_slot[i]);
+	}
+
+	tdm_chan_len = nau8360_get_tdm_chan_len(nau8360) >> 3;
+	for (i = 0; i < NAU8360_TDM_TXN; i++) {
+		if (nau8360->tdm_tx_func_slot[i] == TDM_SLOT_NONE)
+			continue;
+
+		/* compute the slot location in bytes according to slot/chan width */
+		chan_tx = (tdm_chan_len * nau8360->tdm_tx_func_slot[i]);
+		nau8360_set_tdm_tx_slot(cp, i, chan_tx);
+	}
+}
+
+static void nau8360_dsp_fw_load(struct nau8360 *nau8360)
+{
+	nau8360->load_fw_done = false;
+	schedule_work(&nau8360->load_fw_work);
+}
+
+static void nau8360_load_fw_work(struct work_struct *work)
+{
+	struct nau8360 *nau8360 = container_of(work, struct nau8360, load_fw_work);
+	struct snd_soc_component *cp = snd_soc_dapm_to_component(nau8360->dapm);
+	int ret;
+
+	ret = nau8360_dsp_init(cp);
+	if (ret) {
+		dev_err(nau8360->dev, "Failed to initialize DSP: %d\n", ret);
+		nau8360_dsp_enable(nau8360->regmap, false);
+		snd_soc_component_write(cp, NAU8360_R12_PATH_CTRL, NAU8360_DAC_SEL_BYP);
+		return;
+	}
+	nau8360->load_fw_done = true;
 }
 
 static int nau8360_codec_probe(struct snd_soc_component *component)
@@ -1733,51 +2119,45 @@ static int nau8360_codec_probe(struct snd_soc_component *component)
 	struct nau8360 *nau8360 = snd_soc_component_get_drvdata(component);
 	struct regmap *regmap = nau8360->regmap;
 	struct device *dev = nau8360->dev;
-	int ret, vbat, vsaw_level, vsaw_slope, value = 8;
+	int ret, vbat, vsaw_level, vsaw_slope;
 
 	nau8360->dapm = dapm;
-
-	nau8360_coeff_set_def(regmap);
-	regmap_update_bits(regmap, NAU8360_R90_HW2_CTL0, NAU8360_HW2_STALL, 0);
-	nau8360_dsp_software_reset(component);
-	if (nau8360->dsp_enable) {
-		value = nau8360->anc_enable ? 0xf : 0xc;
-		nau8360_dsp_enable(regmap, true);
-		ret = nau8360_dsp_init(component);
-		if (ret) {
-			nau8360_dsp_enable(regmap, false);
-			dev_err(dev, "can't enable DSP (%d)", ret);
-			goto err;
-		}
+	nau8360_dsp_bootup(component);
+	nau8360_dsp_fw_load(nau8360);
+	ret = nau8360_dsp_setup_controls(component);
+	if (ret) {
+		nau8360_dsp_enable(regmap, false);
+		dev_err(dev, "DSP setup controls failed(%d)", ret);
+		goto err;
 	}
-	regmap_update_bits(regmap, NAU8360_R9D_PEQ_CTL, NAU8360_PEQ_BAND_MASK,
-		value << NAU8360_PEQ_BAND_SFT);
+	nau8360_tdm_function_config(component);
 
-	/* defalut disable Sense signal after booting */
+	/* default disable Sense signal after booting */
 	snd_soc_dapm_disable_pin(nau8360->dapm, "Sense");
 	snd_soc_dapm_sync(nau8360->dapm);
 
-	/* VBAT is assigned by system or sensed by chip. */
-	if (nau8360->vbat_voltage)
-		vbat = nau8360->vbat_voltage;
-	else
-		vbat = nau8360_vbat_level(regmap);
+	nau8360_coeff_set_def(nau8360);
+	/* VBAT is sensed by chip. */
+	ret = nau8360_vbat_level(regmap, &vbat);
+	if (ret) {
+		dev_err(dev, "Failed to get valid VBAT level: %d", ret);
+		goto err;
+	}
 	dev_dbg(dev, "VBAT %dV for nau8360", vbat);
 
 	/* Config sawtooth clock according to VBAT. Class D modulator input short setting
 	 * for mute and de-pop purpose. Restore normal after initiation.
 	 */
-	ret = nau8360_sawtooth_params(vbat, &vsaw_level, &vsaw_slope);
-	if (ret) {
-		dev_err(dev, "can't get sawtooth clock parameters (%d)", ret);
-		goto err;
-	}
+	nau8360_sawtooth_params(vbat, &vsaw_level, &vsaw_slope);
+
 	regmap_update_bits(regmap, NAU8360_RA5_ANA_REG_1, NAU8360_VSAW_LV_MASK |
 		NAU8360_KVCO_SAW_MASK, (vsaw_level << NAU8360_VSAW_LV_SFT) |
 		(vsaw_slope << NAU8360_KVCO_SAW_SFT));
 
 	return 0;
+
 err:
+	cancel_work_sync(&nau8360->load_fw_work);
 	return ret;
 }
 
@@ -1785,10 +2165,11 @@ static int __maybe_unused nau8360_suspend(struct snd_soc_component *component)
 {
 	struct nau8360 *nau8360 = snd_soc_component_get_drvdata(component);
 
+	cancel_work_sync(&nau8360->load_fw_work);
+
 	regmap_update_bits(nau8360->regmap, NAU8360_R90_HW2_CTL0, NAU8360_HW2_STALL,
 		NAU8360_HW2_STALL);
-	if (nau8360->dsp_enable)
-		nau8360_dsp_enable(nau8360->regmap, false);
+	nau8360_dsp_enable(nau8360->regmap, false);
 
 	regcache_cache_only(nau8360->regmap, true);
 	regcache_mark_dirty(nau8360->regmap);
@@ -1800,31 +2181,22 @@ static int __maybe_unused nau8360_resume(struct snd_soc_component *component)
 {
 	struct nau8360 *nau8360 = snd_soc_component_get_drvdata(component);
 	struct regmap *regmap = nau8360->regmap;
-	struct device *dev = nau8360->dev;
-	int ret;
 
 	regcache_cache_only(regmap, false);
+
+	nau8360_dsp_bootup(component);
+
+	nau8360_peq_mem_enable(regmap, true);
 	regcache_sync(regmap);
+	nau8360_peq_mem_enable(regmap, false);
+
 	/* disable Sense at standby */
 	snd_soc_dapm_disable_pin(nau8360->dapm, "Sense");
 	snd_soc_dapm_sync(nau8360->dapm);
 
-	regmap_update_bits(regmap, NAU8360_R90_HW2_CTL0, NAU8360_HW2_STALL, 0);
-	nau8360_dsp_software_reset(component);
-	if (nau8360->dsp_enable) {
-		nau8360_dsp_enable(regmap, true);
-		/* loading DSP firmware */
-		ret = nau8360_dsp_reinit(component);
-		if (ret) {
-			nau8360_dsp_enable(regmap, false);
-			dev_err(dev, "can't enable DSP (%d)", ret);
-			goto err;
-		}
-	}
+	nau8360_dsp_fw_load(nau8360);
 
 	return 0;
-err:
-	return ret;
 }
 
 static const struct snd_soc_component_driver soc_comp_dev_nau8360 = {
@@ -1865,91 +2237,78 @@ static struct snd_soc_dai_driver nau8360_dai = {
 	.playback = {
 		.stream_name = "Playback",
 		.channels_min = 1,
-		.channels_max = 2,
+		.channels_max = 4,
 		.rates = NAU8360_RATES,
 		.formats = NAU8360_FORMATS,
 	},
 	.capture = {
 		.stream_name = "Capture",
 		.channels_min = 1,
-		.channels_max = 4,
+		.channels_max = 8,
 		.rates = NAU8360_RATES,
 		.formats = NAU8360_FORMATS,
 	},
 	.ops = &nau8360_dai_ops,
+	.symmetric_rate = 1,
 };
 
 static int nau8360_reg_write(void *context, unsigned int reg, unsigned int value)
 {
 	struct i2c_client *client = context;
+	struct nau8360 *nau8360 = i2c_get_clientdata(client);
 	int ret, count = 0;
-	u8 buf[6];
 
-	buf[count++] = reg >> 8;
-	buf[count++] = reg;
-	if (reg != NAU8360_RF000_DSP_COMM && reg != NAU8360_RF002_DSP_COMM) {
-		/* format for G10, 2 bytes value and endian big */
-		buf[count++] = value >> 8;
-		buf[count++] = value;
-		dev_dbg(&client->dev, " %x <= %x", reg, value);
-	} else {
+	put_unaligned_be16(reg, &nau8360->i2c_write_buf[count]);
+	count += 2;
+
+	if (NAU8360_IS_DSP_REG(reg)) {
 		/* format for DSP, 4 bytes value and native */
-		*(u32 *)&buf[count] = value;
-		count += sizeof(u32);
-#ifdef DSP_DBG
-		dev_dbg(&client->dev, " %x <= %x", reg, value);
-#endif
+		put_unaligned_le32(value, &nau8360->i2c_write_buf[count]);
+		count += 4;
+	} else {
+		/* format for Codec, 2 bytes value and endian big */
+		put_unaligned_be16(value, &nau8360->i2c_write_buf[count]);
+		count += 2;
 	}
 
-	ret = i2c_master_send(client, buf, count);
+	ret = i2c_master_send(client, nau8360->i2c_write_buf, count);
+
 	if (ret == count)
 		return 0;
-	else if (ret < 0)
+	if (ret < 0)
 		return ret;
-	else
-		return -EIO;
+
+	return -EIO;
 }
 
 static int nau8360_reg_read(void *context, unsigned int reg, unsigned int *value)
 {
 	struct i2c_client *client = context;
+	struct nau8360 *nau8360 = i2c_get_clientdata(client);
 	struct i2c_msg xfer[2];
-	u8 buf[4];
-	const u8 *b = buf;
-	u16 reg_buf;
 	int ret;
 
-	reg_buf = cpu_to_be16(reg);
+	put_unaligned_be16(reg, &nau8360->i2c_read_reg);
 	xfer[0].addr = client->addr;
-	xfer[0].len = sizeof(reg_buf);
-	xfer[0].buf = (u8 *)&reg_buf;
+	xfer[0].len = 2;
+	xfer[0].buf = nau8360->i2c_read_reg;
 	xfer[0].flags = 0;
 
 	xfer[1].addr = client->addr;
-	if (reg != NAU8360_RF000_DSP_COMM && reg != NAU8360_RF002_DSP_COMM)
-		xfer[1].len = 2;
-	else
-		xfer[1].len = 4;
-	xfer[1].buf = buf;
+	xfer[1].len = (NAU8360_IS_DSP_REG(reg)) ? 4 : 2;
+	xfer[1].buf = nau8360->i2c_read_buf;
 	xfer[1].flags = I2C_M_RD;
 
 	ret = i2c_transfer(client->adapter, xfer, ARRAY_SIZE(xfer));
 	if (ret < 0)
 		return ret;
-	else if (ret != ARRAY_SIZE(xfer))
+	if (ret != ARRAY_SIZE(xfer))
 		return -EIO;
 
-	if (reg != NAU8360_RF000_DSP_COMM && reg != NAU8360_RF002_DSP_COMM) {
-		/* parse for G10, 2 bytes value and endian big */
-		*value = b[1];
-		*value |= ((unsigned int)b[0]) << 8;
-	} else {
-		/* parse for DSP, 4 bytes value and native */
-		*value = *(u32 *)b;
-#ifdef DSP_DBG
-		dev_dbg(&client->dev, " %x => %x", reg, *value);
-#endif
-	}
+	if (NAU8360_IS_DSP_REG(reg))
+		*value = get_unaligned_le32(nau8360->i2c_read_buf);
+	else
+		*value = get_unaligned_be16(nau8360->i2c_read_buf);
 
 	return 0;
 }
@@ -2084,28 +2443,6 @@ static inline void nau8360_reset_chip(struct regmap *regmap)
 	regmap_write(regmap, NAU8360_R00_SOFTWARE_RST, 0xa5a5);
 }
 
-static inline void nau8360_dsp_software_reset(struct snd_soc_component *component)
-{
-	/* Enable PLL for successful DSP reset. After DSP is alive,
-	 * system clock switches to internal clock and disable PLL.
-	 */
-	snd_soc_component_update_bits(component, NAU8360_R72_PLL_CFG0,
-		NAU8360_PD_PLL_MASK, NAU8360_PD_PLL_EN);
-	msleep(50);
-	snd_soc_component_write(component, NAU8360_R01_DSP_SOFTWARE_RST, 0x5a5a);
-	snd_soc_component_write(component, NAU8360_R01_DSP_SOFTWARE_RST, 0xa5a5);
-	snd_soc_component_set_sysclk(component, NAU8360_CLK_ID_INT, 0, 0,
-		SND_SOC_CLOCK_IN);
-}
-
-static inline void nau8360_dsp_enable(struct regmap *regmap, bool enable)
-{
-	regmap_update_bits(regmap, NAU8360_R86_HW3_CTL0, NAU8360_HW3_STALL,
-		enable ? 0 : NAU8360_HW3_STALL);
-	regmap_update_bits(regmap, NAU8360_R1A_DSP_CORE_CTRL2, NAU8360_DSP_RUNSTALL,
-		enable ? 0 : NAU8360_DSP_RUNSTALL);
-}
-
 static void nau8360_init_regs(struct nau8360 *nau8360)
 {
 	struct regmap *regmap = nau8360->regmap;
@@ -2115,9 +2452,8 @@ static void nau8360_init_regs(struct nau8360 *nau8360)
 	/* Enable Software Shutdown Mode */
 	regmap_write(regmap, NAU8360_R77_SOFT_SD, NAU8360_SOFT_SD_EN);
 	/* Stall HW1 PEQ Engine and Clear DRAM to Zero */
-	regmap_update_bits(regmap, NAU8360_R9D_PEQ_CTL, NAU8360_PEQ_STALL |
-		NAU8360_HW1_MEM_CLEAR, NAU8360_PEQ_STALL | NAU8360_HW1_MEM_CLEAR);
-	regmap_update_bits(regmap, NAU8360_R9D_PEQ_CTL, NAU8360_HW1_MEM_CLEAR, 0);
+	regmap_update_bits(regmap, NAU8360_R9D_PEQ_CTL, NAU8360_PEQ_STALL,
+		NAU8360_PEQ_STALL);
 	/* Stall HW2 engine */
 	regmap_update_bits(regmap, NAU8360_R90_HW2_CTL0, NAU8360_HW2_STALL,
 		NAU8360_HW2_STALL);
@@ -2131,8 +2467,6 @@ static void nau8360_init_regs(struct nau8360 *nau8360)
 	regmap_update_bits(regmap, NAU8360_R10_I2S_DATA_CTRL3,
 		NAU8360_RX_ANC_R_MASK | NAU8360_RX_ANC_L_MASK,
 		0x3 << NAU8360_RX_ANC_R_SFT | 0x2 << NAU8360_RX_ANC_L_SFT);
-	regmap_update_bits(regmap, NAU8360_R96_HW2_CTL6, NAU8360_HW1_ANC_EN,
-		nau8360->anc_enable);
 	/* Set DAC Clock Divider as 2 and Chopper Divider as 16 */
 	regmap_update_bits(regmap, NAU8360_R71_CLK_DIV_CFG,
 		NAU8360_DAC_CLK_DIV_MASK | NAU8360_DAC_CHOP_CLK_DIV_MASK,
@@ -2141,10 +2475,6 @@ static void nau8360_init_regs(struct nau8360 *nau8360)
 	regmap_update_bits(regmap, NAU8360_R5D_SINC_CFG,
 		NAU8360_DAC_SINC_OSR_MASK | NAU8360_IVSENSE_BS_OSR_MASK,
 		NAU8360_DAC_SINC_OSR_128 | NAU8360_IVSENSE_BS_OSR_32);
-
-	/* DAC gain setting 0dB by changing current cell current. */
-	regmap_update_bits(regmap, NAU8360_R6E_DAC_CFG0, NAU8360_DAC_CUR_MASK,
-		NAU8360_DAC_CUR_0DB);
 
 	/* Set Trim Bit Control of DLDO and GVDD to The Highest Voltage */
 	regmap_write(regmap, NAU8360_R5F_ANA_TRIM_CFG1, 0xf407);
@@ -2160,12 +2490,10 @@ static void nau8360_init_regs(struct nau8360 *nau8360)
 	regmap_update_bits(regmap, NAU8360_R9C_HW1_CTL2, NAU8360_MUTE_INTRVL_MASK |
 		NAU8360_HW1_CH_MUTE | NAU8360_HW1_ZERO_THD_MASK,
 		NAU8360_MUTE_INTRVL_699MS | NAU8360_HW1_CH_MUTE | 0xff);
-	/* set HW2 droop with 192K and normal/low latency */
+	/* set HW2 droop with 192K*/
 	regmap_update_bits(regmap, NAU8360_R96_HW2_CTL6, NAU8360_HW2_DROOP_SEL_MASK |
-		NAU8360_HW2_DROOP_EN | NAU8360_HW2_LATENCY_MASK | NAU8360_HW2_FS_MASK,
-		NAU8360_HW2_DROOP_SEL_LARGE | NAU8360_HW2_DROOP_EN |
-		(nau8360->low_latency ? NAU8360_HW2_LATENCY_LOW :
-			NAU8360_HW2_LATENCY_NOR) | NAU8360_HW2_FS_192K);
+		NAU8360_HW2_DROOP_EN | NAU8360_HW2_FS_MASK,
+		NAU8360_HW2_DROOP_SEL_LARGE | NAU8360_HW2_DROOP_EN | NAU8360_HW2_FS_192K);
 	/* Set HW2 default volume */
 	regmap_write(regmap, NAU8360_R97_HW2_CTL7, 0xbf66);
 	regmap_write(regmap, NAU8360_R98_HW2_CTL8, 0xbf66);
@@ -2178,14 +2506,9 @@ static void nau8360_init_regs(struct nau8360 *nau8360)
 	regmap_update_bits(regmap, NAU8360_R12_PATH_CTRL, NAU8360_SEL_HW1_MASK |
 		NAU8360_AUD_SEL_MASK | NAU8360_SEL_HW2_MASK | NAU8360_SEL_HW3_MASK |
 		NAU8360_DAC_SEL_MASK, NAU8360_SEL_HW1_OUT | NAU8360_AUD_SEL_SINCOUT |
-		NAU8360_SEL_HW2_OUT | NAU8360_SEL_HW3_OUT | (nau8360->dsp_enable ?
-			NAU8360_DAC_SEL_DSP : NAU8360_DAC_SEL_BYP));
+		NAU8360_SEL_HW2_OUT | NAU8360_SEL_HW3_OUT);
 	/* Set Input Status as Low and Input/Output Mode Disable for All GPIO */
 	regmap_write(regmap, NAU8360_R07_GP_CTRL, 0x0000);
-	/* Set GPIO1 and GPIO2 MUX as Reserved */
-	regmap_write(regmap, NAU8360_R08_GP_CTRL0, 0x8181);
-	/* set GPIO3 MUX as Clock output */
-	regmap_write(regmap, NAU8360_R09_GP_CTRL1, 0x1e9e);
 	/* enable SARADC with extra average filter of VBAT */
 	regmap_update_bits(regmap, NAU8360_R6A_SARADC_CFG0, NAU8360_SARADC_EN |
 		NAU8360_VBAT_AVG_EN, NAU8360_SARADC_EN | NAU8360_VBAT_AVG_EN);
@@ -2244,14 +2567,6 @@ static void nau8360_init_regs(struct nau8360 *nau8360)
 	/* Enable TX SDOUT and Data at BCLK Rising. */
 	regmap_update_bits(regmap, NAU8360_R0D_I2S_PCM_CTRL3, NAU8360_TX_FILL_MASK,
 		NAU8360_TX_FILL_ZERO);
-	/* Switch AEC. The configuration can change in TDM slot setting later. */
-	if (nau8360->aec_enable)
-		regmap_update_bits(regmap, NAU8360_R17_I2S0_DATA_CTRL5,
-			NAU8360_AEC_L_EN | NAU8360_AEC_R_EN,
-			NAU8360_AEC_L_EN | NAU8360_AEC_R_EN);
-	/* TDM channel length configuration and  TX data length as 16 bit */
-	regmap_update_bits(regmap, NAU8360_R0C_I2S_PCM_CTRL2, NAU8360_TDM_CLEN_MASK,
-		((nau8360->tdm_chan_len - 16) >> 3) << NAU8360_TDM_CLEN_SFT);
 	regmap_update_bits(regmap, NAU8360_R0D_I2S_PCM_CTRL3,
 		NAU8360_VSNS_L_SLEN_MASK, NAU8360_VSNS_L_SLEN_16);
 	regmap_update_bits(regmap, NAU8360_R0E_I2S_DATA_CTRL1,
@@ -2290,55 +2605,92 @@ static void nau8360_print_device_properties(struct nau8360 *nau8360)
 {
 	int i;
 
-	dev_dbg(nau8360->dev, "dsp-bypass:          %d", !nau8360->dsp_enable);
-	dev_dbg(nau8360->dev, "low-latency:         %d", nau8360->low_latency);
-	dev_dbg(nau8360->dev, "anc-enable:          %d", nau8360->anc_enable);
-	dev_dbg(nau8360->dev, "aec-enable:          %d", nau8360->aec_enable);
 	dev_dbg(nau8360->dev, "pbtl-enable:         %d", nau8360->pbtl_enable);
 	dev_dbg(nau8360->dev, "dac-cur-enable:      %d", nau8360->dac_cur_enable);
-	dev_dbg(nau8360->dev, "vbat-voltage:        %d", nau8360->vbat_voltage);
-	dev_dbg(nau8360->dev, "tdm-channel-length:  %d", nau8360->tdm_chan_len);
-	for (i = 0; i < nau8360->dsp_fws_num; i++)
-		dev_dbg(nau8360->dev, "dsp-fw-names[%d]:     %s", i,
+	for (i = 0; i < NAU8360_DSP_FW_NUM; i++)
+		dev_dbg(nau8360->dev, "firmware-name[%d]:     %s", i,
 			nau8360->dsp_firmware[i]);
+
+	for (i = 0; i < NAU8360_TDM_TXN; i++)
+		dev_dbg(nau8360->dev, "dsp-tx-slot[%d] (%s): %d%s", i,
+			nau8360_tx_func_names[i], nau8360->tdm_tx_func_slot[i],
+			nau8360->tdm_tx_func_slot[i] == TDM_SLOT_NONE ? " (none)" : "");
+
+	for (i = 0; i < NAU8360_TDM_RXN; i++)
+		dev_dbg(nau8360->dev, "dsp-rx-slot[%d] (%s): %d%s", i,
+			nau8360_rx_func_names[i], nau8360->tdm_rx_func_slot[i],
+			nau8360->tdm_rx_func_slot[i] == TDM_SLOT_NONE ? " (none)" : "");
 }
 
-static void nau8360_read_device_properties(struct nau8360 *nau8360)
+static int nau8360_read_device_properties(struct nau8360 *nau8360)
 {
-	const struct device_node *np = nau8360->dev->of_node;
+	const char *def_fws[NAU8360_DSP_FW_NUM] = {
+		NAU8360_DSP_FIRMWARE".l", NAU8360_DSP_FIRMWARE".r"
+	};
 	struct device *dev = nau8360->dev;
+	const char *firmware_names[NAU8360_DSP_FW_NUM];
 	int i, ret;
 
-	nau8360->dsp_enable = !device_property_read_bool(dev, "nuvoton,dsp-bypass");
-	nau8360->low_latency = device_property_read_bool(dev, "nuvoton,low-latency");
-	nau8360->anc_enable = device_property_read_bool(dev, "nuvoton,anc-enable");
-	nau8360->aec_enable = device_property_read_bool(dev, "nuvoton,aec-enable");
-	nau8360->pbtl_enable = device_property_read_bool(dev, "nuvoton,pbtl-enable");
-	nau8360->dac_cur_enable = device_property_read_bool(dev, "nuvoton,dac-cur-enable");
-	ret = device_property_read_u32(dev, "nuvoton,vbat-voltage",
-			&nau8360->vbat_voltage);
-	if (ret)
-		nau8360->vbat_voltage = 0;
-	ret = device_property_read_u32(dev, "nuvoton,tdm-channel-length",
-			&nau8360->tdm_chan_len);
-	if (ret || (nau8360->tdm_chan_len != 16 && nau8360->tdm_chan_len != 24 &&
-			nau8360->tdm_chan_len != 32)) {
-		dev_err(dev, "Invalid TDM channel length. Assign 32 bits.");
-		nau8360->tdm_chan_len = 32;
-	}
-	ret = of_property_count_strings(np, "nuvoton,dsp-fw-names");
-	if (ret == NAU8360_DSP_FW_NUM) {
-		nau8360->dsp_fws_num = ret;
-		for (i = 0; i < nau8360->dsp_fws_num; i++) {
-			ret = of_property_read_string_index(np, "nuvoton,dsp-fw-names",
-					i, &nau8360->dsp_firmware[i]);
-			if (ret) {
-				dev_err(dev, "Invalid dsp-fw-names[%d]", i);
-				nau8360->dsp_fws_num = 0;
-				break;
+	ret = device_property_read_u32_array(dev, "nuvoton,dsp-tx-slot-mapping",
+		nau8360->tdm_tx_func_slot, NAU8360_TDM_TXN);
+	if (ret) {
+		for (i = 0; i < NAU8360_TDM_TXN; i++)
+			nau8360->tdm_tx_func_slot[i] = TDM_SLOT_NONE;
+	} else {
+		for (i = 0; i < NAU8360_TDM_TXN; i++) {
+			if (nau8360->tdm_tx_func_slot[i] == TDM_SLOT_NONE)
+				continue;
+			if (nau8360->tdm_tx_func_slot[i] >= NAU8360_TDM_MAX_CHAN) {
+				dev_warn(dev, "Invalid TX slot %d, set to none\n",
+					nau8360->tdm_tx_func_slot[i]);
+				nau8360->tdm_tx_func_slot[i] = TDM_SLOT_NONE;
 			}
 		}
 	}
+
+	ret = device_property_read_u32_array(dev, "nuvoton,dsp-rx-slot-mapping",
+		nau8360->tdm_rx_func_slot, NAU8360_TDM_RXN);
+	if (ret) {
+		nau8360->tdm_rx_func_slot[NAU8360_TDM_DACL] = 0;
+		nau8360->tdm_rx_func_slot[NAU8360_TDM_DACR] = 1;
+		nau8360->tdm_rx_func_slot[NAU8360_TDM_ANCL] = TDM_SLOT_NONE;
+		nau8360->tdm_rx_func_slot[NAU8360_TDM_ANCR] = TDM_SLOT_NONE;
+	} else {
+		for (i = 0; i < NAU8360_TDM_RXN; i++) {
+			if (nau8360->tdm_rx_func_slot[i] == TDM_SLOT_NONE)
+				continue;
+			if (nau8360->tdm_rx_func_slot[i] >= NAU8360_TDM_MAX_CHAN) {
+				dev_warn(dev, "Invalid RX slot %d, set to none\n",
+					nau8360->tdm_rx_func_slot[i]);
+				nau8360->tdm_rx_func_slot[i] = TDM_SLOT_NONE;
+			}
+		}
+	}
+
+	nau8360->pbtl_enable = device_property_read_bool(dev, "nuvoton,pbtl-enable");
+	nau8360->dac_cur_enable = device_property_read_bool(dev, "nuvoton,dac-cur-enable");
+
+	ret = device_property_read_string_array(dev, "firmware-name",
+		firmware_names, NAU8360_DSP_FW_NUM);
+	if (ret !=  NAU8360_DSP_FW_NUM) {
+		dev_warn(dev, "The firmware-name was not found, using default.");
+		for (i = 0; i < NAU8360_DSP_FW_NUM; i++) {
+			nau8360->dsp_firmware[i] = devm_kstrdup(dev, def_fws[i], GFP_KERNEL);
+
+			if (!nau8360->dsp_firmware[i])
+				return -ENOMEM;
+		}
+	} else {
+		for (i = 0; i < NAU8360_DSP_FW_NUM; i++) {
+			nau8360->dsp_firmware[i] = devm_kasprintf(dev, GFP_KERNEL,
+				NAU8360_DSP_FIRMDIR "%s", firmware_names[i]);
+
+			if (!nau8360->dsp_firmware[i])
+				return -ENOMEM;
+		}
+	}
+
+	return 0;
 }
 
 static struct reg_default *nau8360_alloc_defaults(struct device *dev, int *total_regs)
@@ -2356,10 +2708,9 @@ static struct reg_default *nau8360_alloc_defaults(struct device *dev, int *total
 	idx = reg_num;
 
 	for (i = 0; i < NAU8360_TOT_BAND_PER_CH; i++) {
-		unsigned int l_base = NAU8360_R100_LEFT_BIQ0_COE +
-					(i * NAU8360_TOT_BAND_COE_RANGE);
-		unsigned int r_base = NAU8360_R200_RIGHT_BIQ0_COE +
-					(i * NAU8360_TOT_BAND_COE_RANGE);
+		unsigned int range = i * NAU8360_TOT_BAND_COE_RANGE;
+		unsigned int l_base = NAU8360_R100_LEFT_BIQ0_COE + range;
+		unsigned int r_base = NAU8360_R200_RIGHT_BIQ0_COE + range;
 
 		for (j = 0; j < NAU8360_TOT_BAND_COE; j++) {
 			dyn_defaults[idx++].reg = l_base + j;
@@ -2375,18 +2726,19 @@ static struct reg_default *nau8360_alloc_defaults(struct device *dev, int *total
 static int nau8360_i2c_probe(struct i2c_client *i2c, const struct i2c_device_id *id)
 {
 	struct device *dev = &i2c->dev;
-	struct nau8360 *nau8360 = dev_get_platdata(dev);
+	struct nau8360 *nau8360;
 	struct regmap_config regmap_cfg = nau8360_regmap_config;
 	struct reg_default *dyn_defaults;
 	int num_total_regs;
 	int ret, value;
 
-	if (!nau8360) {
-		nau8360 = devm_kzalloc(dev, sizeof(*nau8360), GFP_KERNEL);
-		if (!nau8360)
-			return -ENOMEM;
-	}
+	nau8360 = devm_kzalloc(dev, sizeof(*nau8360), GFP_KERNEL);
+	if (!nau8360)
+		return -ENOMEM;
+
 	i2c_set_clientdata(i2c, nau8360);
+	mutex_init(&nau8360->lock);
+	INIT_WORK(&nau8360->load_fw_work, nau8360_load_fw_work);
 
 	dyn_defaults = nau8360_alloc_defaults(dev, &num_total_regs);
 	if (!dyn_defaults)
@@ -2403,15 +2755,14 @@ static int nau8360_i2c_probe(struct i2c_client *i2c, const struct i2c_device_id 
 	nau8360_reset_chip(nau8360->regmap);
 	ret = regmap_read(nau8360->regmap, NAU8360_R46_I2C_DEVICE_ID, &value);
 	if (ret) {
-		dev_err(dev, "Failed to read NAU83G60 device id %d",
-			ret);
+		dev_err(dev, "Failed to read NAU83G60 device id %d", ret);
 		return ret;
 	}
 
-	nau8360->hw1_vol_l = nau8360->hw1_vol_r = 120;
-	nau8360->dsp_created = false;
-	nau8360->sys_clk = ADSP_SR_48000 * NAU8360_MCLK_FS_RATIO_256;
-	nau8360_read_device_properties(nau8360);
+	ret = nau8360_read_device_properties(nau8360);
+	if (ret)
+		return ret;
+
 	nau8360_print_device_properties(nau8360);
 	nau8360_init_regs(nau8360);
 
@@ -2419,30 +2770,33 @@ static int nau8360_i2c_probe(struct i2c_client *i2c, const struct i2c_device_id 
 	create_sysfs_debug(dev);
 #endif
 
-	return snd_soc_register_component(dev, &soc_comp_dev_nau8360, &nau8360_dai, 1);
+	return devm_snd_soc_register_component(dev, &soc_comp_dev_nau8360, &nau8360_dai, 1);
+}
+
+static void nau8360_i2c_remove(struct i2c_client *client)
+{
+	struct nau8360 *nau8360 = i2c_get_clientdata(client);
+
+	cancel_work_sync(&nau8360->load_fw_work);
 }
 
 static const struct i2c_device_id nau8360_i2c_ids[] = {
-	{ "nau8360", 0 },
-	{ }
+	{ .name = "nau8360" },
+	{}
 };
 MODULE_DEVICE_TABLE(i2c, nau8360_i2c_ids);
 
-#ifdef CONFIG_OF
 static const struct of_device_id nau8360_of_ids[] = {
-	{ .compatible = "nuvoton,nau8360", },
+	{ .compatible = "nuvoton,nau8360" },
 	{}
 };
 MODULE_DEVICE_TABLE(of, nau8360_of_ids);
-#endif
 
-#ifdef CONFIG_ACPI
 static const struct acpi_device_id nau8360_acpi_match[] = {
-	{"NVTN2002", 0,},
-	{},
+	{ .id = "NVTN2002" },
+	{}
 };
 MODULE_DEVICE_TABLE(acpi, nau8360_acpi_match);
-#endif
 
 static struct i2c_driver nau8360_i2c_driver = {
 	.driver = {
@@ -2451,6 +2805,7 @@ static struct i2c_driver nau8360_i2c_driver = {
 		.acpi_match_table = ACPI_PTR(nau8360_acpi_match),
 	},
 	.probe = nau8360_i2c_probe,
+	.remove = nau8360_i2c_remove,
 	.id_table = nau8360_i2c_ids,
 };
 module_i2c_driver(nau8360_i2c_driver);
@@ -2459,4 +2814,5 @@ MODULE_DESCRIPTION("ASoC NAU83G60 Stereo Class-D Amplifier with DSP and I/V-sens
 MODULE_AUTHOR("David Lin <ctlin0@nuvoton.com>");
 MODULE_AUTHOR("Seven Lee <wtli@nuvoton.com>");
 MODULE_AUTHOR("John Hsu <kchsu0@nuvoton.com>");
+MODULE_AUTHOR("Neo Chang <ylchang2@nuvoton.com>");
 MODULE_LICENSE("GPL v2");
