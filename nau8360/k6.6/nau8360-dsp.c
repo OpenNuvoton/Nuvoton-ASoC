@@ -239,7 +239,7 @@ static int nau8360_message_to_dsp(struct snd_soc_component *cp,
 #endif
 
 	if (!cmd_info->msg_param)
-		return ret;
+		return 0;
 
 	/* sending payload + padding */
 	payload = nau8360_pack_param(param_offset, param_size);

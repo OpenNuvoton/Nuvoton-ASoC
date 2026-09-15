@@ -1115,15 +1115,15 @@ static int nau8360_dac_mux_put_enum(struct snd_kcontrol *kcontrol,
 
 	snd_soc_dapm_mutex_lock(dapm);
 	if (snd_soc_component_get_bias_level(component) > SND_SOC_BIAS_STANDBY) {
-		dev_warn(nau8360->dev, "changing path is not allowed during playback");
+		dev_warn_ratelimited(nau8360->dev, "changing path is not allowed during playback");
 		snd_soc_dapm_mutex_unlock(dapm);
-		return ret;
+		return -EBUSY;
 	}
 
 	if (item[0] == NAU8360_DAC_SRC_DSP && !nau8360->load_fw_done) {
-		dev_warn(nau8360->dev, "Cannot enable DSP: Firmware not ready or disabled\n");
+		dev_warn_ratelimited(nau8360->dev, "Cannot enable DSP: Firmware not ready or disabled\n");
 		snd_soc_dapm_mutex_unlock(dapm);
-		return ret;
+		return -EBUSY;
 	}
 	snd_soc_dapm_mutex_unlock(dapm);
 
