@@ -29,64 +29,64 @@ static const struct reg_default nau83110_reg_defaults[] = {
 	{ NAU83110_R00_SW_RST_EN, 0x0000 },
 	{ NAU83110_R01_AUDIO_RST_EN, 0x0000 },
 	{ NAU83110_R02_I2C_ADDRESS_LATCH, 0x0000 },
-	{ NAU83110_R16_INTR_CTRL0, 0x8800 },
-	{ NAU83110_R17_INTR_CTRL1, 0xffff },
-	{ NAU83110_R18_INTR_CTRL2, 0x0000 },
+	{ NAU83110_R16_INTR_POLAR, 0x8800 },
+	{ NAU83110_R17_INTR_EN, 0xffff },
+	{ NAU83110_R18_INTR_MASK, 0x0000 },
 	{ NAU83110_R58_DAC_VOLUME_CTRL, 0x00f3},
 	{ NAU83110_R59_ALC_MODE_CTRL, 0x4000},
-	{ NAU83110_R5A_ALCDCY_CLIP, 0x03e8},
-	{ NAU83110_R5B_ALCATK_CLIP, 0x0010},
-	{ NAU83110_R5C_ALCHLD_CLIP, 0x0000},
+	{ NAU83110_R5A_ALC_DCY, 0x03e8},
+	{ NAU83110_R5B_ALC_ATK_CLIP, 0x0010},
+	{ NAU83110_R5C_ALC_HLD_CLIP, 0x0000},
 	{ NAU83110_R5D_ALC_MINGAIN_CLIP, 0x0000},
-	{ NAU83110_R5F_ALCATK_OTW2, 0x1388},
-	{ NAU83110_R60_ALCHLD_OTW2, 0x01f4},
+	{ NAU83110_R5F_ALC_ATK_OTW2, 0x1388},
+	{ NAU83110_R60_ALC_HLD_OTW2, 0x01f4},
 	{ NAU83110_R61_ALC_MINGAIN_OTW2, 0x0000},
-	{ NAU83110_R63_ALCATK_OTW1, 0x1388},
-	{ NAU83110_R64_ALCHLD_OTW1, 0x01f4},
+	{ NAU83110_R63_ALC_ATK_OTW1, 0x1388},
+	{ NAU83110_R64_ALC_HLD_OTW1, 0x01f4},
 	{ NAU83110_R65_ALC_MINGAIN_OTW1, 0x0000},
-	{ NAU83110_R67_ALCATK_UVLOP, 0x0000},
-	{ NAU83110_R68_ALCHLD_UVLOP, 0x0064},
-	{ NAU83110_R69_ALC_MINGAIN_STEP_UVLOP, 0x0000},
-	{ NAU83110_R6D_DIAG_CTRL0,  0x0774},
-	{ NAU83110_R6E_DIAG_CTRL1, 0x2929},
-	{ NAU83110_R6F_DIAG_CTRL2, 0x0000},
+	{ NAU83110_R67_ALC_ATK_UVLOP, 0x0000},
+	{ NAU83110_R68_ALC_HLD_UVLOP, 0x0064},
+	{ NAU83110_R69_ALC_MINGAIN_UVLOP, 0x0000},
+	{ NAU83110_R6D_DIAG_EN_CTRL,  0x0774},
+	{ NAU83110_R6E_DIAG_RAMP, 0x2929},
+	{ NAU83110_R6F_DIAG_LOOP, 0x0000},
 	{ NAU83110_R74_CLIP_CTRL, 0x0000},
-	{ NAU83110_R76_DAC_CTRL1, 0x0000},
+	{ NAU83110_R76_DAC_CTRL, 0x0000},
 	{ NAU83110_R77_HPF_CTRL, 0x0000},
 	{ NAU83110_R78_I2S_PCM_CTRL2, 0x0000},
 	{ NAU83110_R7A_MUTE_CTRL, 0x0070},
 	{ NAU83110_R7B_MUTE_RAMP_SPD, 0x000f},
-	{ NAU83110_R7C_TDM_RX_CTRL0, 0x0002},
-	{ NAU83110_R7D_TDM_RX_CTRL1, 0x0000},
-	{ NAU83110_R80_TDM_TX_CTRL0, 0x0000},
-	{ NAU83110_R81_TDM_TX_CTRL1, 0x0000},
+	{ NAU83110_R7C_TDM_RX_MODE_CTRL, 0x0002},
+	{ NAU83110_R7D_TDM_RX_SELECT_CTRL, 0x0000},
+	{ NAU83110_R80_TDM_TX_MODE_CTRL, 0x0000},
+	{ NAU83110_R81_TDM_TX_DATA_CTRL, 0x0000},
 	{ NAU83110_RA8_STANDBY_CTRL, 0x0000},
-	{ NAU83110_RB6_ANALOG_CTRL0, 0x0000},
-	{ NAU83110_RB7_ANALOG_CTRL1, 0x0000},
-	{ NAU83110_RBB_PWRSTAGE_CTRL0, 0x810B},
-	{ NAU83110_RBC_PWRSTAGE_CTRL1, 0x0008},
-	{ NAU83110_RBD_PWRSTAGE_CTRL2, 0xF001},
+	{ NAU83110_RB6_ANALOG_GAIN_CTRL, 0x0000},
+	{ NAU83110_RB7_ANALOG_DACIN_CTRL, 0x0000},
+	{ NAU83110_RBB_PWRSTAGE_EN_CTRL, 0x810B},
+	{ NAU83110_RBC_PWRSTAGE_SELECT_CTRL, 0x0008},
+	{ NAU83110_RBD_PWRSTAGE_HV_CTRL, 0xF001},
 };
 
 static bool nau83110_readable_reg(struct device *dev, unsigned int reg)
 {
 	switch (reg) {
 	case NAU83110_R00_SW_RST_EN ... NAU83110_R02_I2C_ADDRESS_LATCH:
-	case NAU83110_R16_INTR_CTRL0 ... NAU83110_R19_INTR_CTRL3:
-	case NAU83110_R1B_INTR_CTRL4:
+	case NAU83110_R16_INTR_POLAR ... NAU83110_R19_INTR_STS:
+	case NAU83110_R1B_INTR_RSTS:
 	case NAU83110_R58_DAC_VOLUME_CTRL ... NAU83110_R5D_ALC_MINGAIN_CLIP:
-	case NAU83110_R5F_ALCATK_OTW2 ... NAU83110_R61_ALC_MINGAIN_OTW2:
-	case NAU83110_R63_ALCATK_OTW1 ... NAU83110_R65_ALC_MINGAIN_OTW1:
-	case NAU83110_R67_ALCATK_UVLOP ... NAU83110_R69_ALC_MINGAIN_STEP_UVLOP:
-	case NAU83110_R6D_DIAG_CTRL0 ... NAU83110_R6F_DIAG_CTRL2:
+	case NAU83110_R5F_ALC_ATK_OTW2 ... NAU83110_R61_ALC_MINGAIN_OTW2:
+	case NAU83110_R63_ALC_ATK_OTW1 ... NAU83110_R65_ALC_MINGAIN_OTW1:
+	case NAU83110_R67_ALC_ATK_UVLOP ... NAU83110_R69_ALC_MINGAIN_UVLOP:
+	case NAU83110_R6D_DIAG_EN_CTRL ... NAU83110_R6F_DIAG_LOOP:
 	case NAU83110_R74_CLIP_CTRL:
-	case NAU83110_R76_DAC_CTRL1 ... NAU83110_R78_I2S_PCM_CTRL2:
-	case NAU83110_R7A_MUTE_CTRL ... NAU83110_R7D_TDM_RX_CTRL1:
-	case NAU83110_R80_TDM_TX_CTRL0 ... NAU83110_R81_TDM_TX_CTRL1:
+	case NAU83110_R76_DAC_CTRL ... NAU83110_R78_I2S_PCM_CTRL2:
+	case NAU83110_R7A_MUTE_CTRL ... NAU83110_R7D_TDM_RX_SELECT_CTRL:
+	case NAU83110_R80_TDM_TX_MODE_CTRL ... NAU83110_R81_TDM_TX_DATA_CTRL:
 	case NAU83110_RA8_STANDBY_CTRL:
-	case NAU83110_RB6_ANALOG_CTRL0 ... NAU83110_RB7_ANALOG_CTRL1:
-	case NAU83110_RB9_ANALOG_READ0 ... NAU83110_RBD_PWRSTAGE_CTRL2:
-	case NAU83110_RF0_DEV_INFO0 ... NAU83110_RF1_DEV_INFO1:
+	case NAU83110_RB6_ANALOG_GAIN_CTRL ... NAU83110_RB7_ANALOG_DACIN_CTRL:
+	case NAU83110_RBB_PWRSTAGE_EN_CTRL ... NAU83110_RBD_PWRSTAGE_HV_CTRL:
+	case NAU83110_RF0_DEV_INFO ... NAU83110_RF1_DEV_INFO_STS:
 		return true;
 	default:
 		return false;
@@ -97,19 +97,19 @@ static bool nau83110_writeable_reg(struct device *dev, unsigned int reg)
 {
 	switch (reg) {
 	case NAU83110_R00_SW_RST_EN ... NAU83110_R02_I2C_ADDRESS_LATCH:
-	case NAU83110_R16_INTR_CTRL0 ... NAU83110_R19_INTR_CTRL3:
+	case NAU83110_R16_INTR_POLAR ... NAU83110_R19_INTR_STS:
 	case NAU83110_R58_DAC_VOLUME_CTRL ... NAU83110_R5D_ALC_MINGAIN_CLIP:
-	case NAU83110_R5F_ALCATK_OTW2 ... NAU83110_R61_ALC_MINGAIN_OTW2:
-	case NAU83110_R63_ALCATK_OTW1 ... NAU83110_R65_ALC_MINGAIN_OTW1:
-	case NAU83110_R67_ALCATK_UVLOP ... NAU83110_R69_ALC_MINGAIN_STEP_UVLOP:
-	case NAU83110_R6D_DIAG_CTRL0 ... NAU83110_R6F_DIAG_CTRL2:
+	case NAU83110_R5F_ALC_ATK_OTW2 ... NAU83110_R61_ALC_MINGAIN_OTW2:
+	case NAU83110_R63_ALC_ATK_OTW1 ... NAU83110_R65_ALC_MINGAIN_OTW1:
+	case NAU83110_R67_ALC_ATK_UVLOP ... NAU83110_R69_ALC_MINGAIN_UVLOP:
+	case NAU83110_R6D_DIAG_EN_CTRL ... NAU83110_R6F_DIAG_LOOP:
 	case NAU83110_R74_CLIP_CTRL:
-	case NAU83110_R76_DAC_CTRL1 ... NAU83110_R78_I2S_PCM_CTRL2:
-	case NAU83110_R7A_MUTE_CTRL ... NAU83110_R7D_TDM_RX_CTRL1:
-	case NAU83110_R80_TDM_TX_CTRL0 ... NAU83110_R81_TDM_TX_CTRL1:
+	case NAU83110_R76_DAC_CTRL ... NAU83110_R78_I2S_PCM_CTRL2:
+	case NAU83110_R7A_MUTE_CTRL ... NAU83110_R7D_TDM_RX_SELECT_CTRL:
+	case NAU83110_R80_TDM_TX_MODE_CTRL ... NAU83110_R81_TDM_TX_DATA_CTRL:
 	case NAU83110_RA8_STANDBY_CTRL:
-	case NAU83110_RB6_ANALOG_CTRL0 ... NAU83110_RB7_ANALOG_CTRL1:
-	case NAU83110_RBB_PWRSTAGE_CTRL0 ... NAU83110_RBD_PWRSTAGE_CTRL2:
+	case NAU83110_RB6_ANALOG_GAIN_CTRL ... NAU83110_RB7_ANALOG_DACIN_CTRL:
+	case NAU83110_RBB_PWRSTAGE_EN_CTRL ... NAU83110_RBD_PWRSTAGE_HV_CTRL:
 		return true;
 	default:
 		return false;
@@ -120,10 +120,9 @@ static bool nau83110_volatile_reg(struct device *dev, unsigned int reg)
 {
 	switch (reg) {
 	case NAU83110_R00_SW_RST_EN ... NAU83110_R02_I2C_ADDRESS_LATCH:
-	case NAU83110_R19_INTR_CTRL3:
-	case NAU83110_R1B_INTR_CTRL4:
-	case NAU83110_RB9_ANALOG_READ0 ... NAU83110_RBA_ANALOG_READ1:
-	case NAU83110_RF0_DEV_INFO0 ... NAU83110_RF1_DEV_INFO1:
+	case NAU83110_R19_INTR_STS:
+	case NAU83110_R1B_INTR_RSTS:
+	case NAU83110_RF0_DEV_INFO ... NAU83110_RF1_DEV_INFO_STS:
 		return true;
 	default:
 		return false;
@@ -135,7 +134,7 @@ static const DECLARE_TLV_DB_SCALE(dac_vol_tlv, -12150, 50, 0);
 static const char *const nau83110_osr_list[] = { "64", "256", "128", "", "32" };
 
 static const struct soc_enum nau83110_dac_osr_enum =
-	SOC_ENUM_SINGLE(NAU83110_R76_DAC_CTRL1, 0,
+	SOC_ENUM_SINGLE(NAU83110_R76_DAC_CTRL, 0,
 		ARRAY_SIZE(nau83110_osr_list), nau83110_osr_list);
 
 static const char *const nau83110_tdm_slot[] = { "", "", "", "Slot 0", "Slot 1",
@@ -143,7 +142,7 @@ static const char *const nau83110_tdm_slot[] = { "", "", "", "Slot 0", "Slot 1",
 	"Slot 4 + 5" };
 
 static const struct soc_enum nau83110_tdm_sel_enum =
-	SOC_ENUM_SINGLE(NAU83110_R7D_TDM_RX_CTRL1, 0,
+	SOC_ENUM_SINGLE(NAU83110_R7D_TDM_RX_SELECT_CTRL, 0,
 		ARRAY_SIZE(nau83110_tdm_slot), nau83110_tdm_slot);
 
 static int nau83110_wait_for_bit(struct regmap *regmap, unsigned int reg,
@@ -171,26 +170,26 @@ timeout:
 
 static inline int wait_mute_done(struct regmap *regmap)
 {
-	return nau83110_wait_for_bit(regmap, NAU83110_R1B_INTR_CTRL4,
+	return nau83110_wait_for_bit(regmap, NAU83110_R1B_INTR_RSTS,
 		BIT(1), 20, 2000);
 }
 
 static inline int wait_diag_done(struct regmap *regmap)
 {
-	return nau83110_wait_for_bit(regmap, NAU83110_R19_INTR_CTRL3,
+	return nau83110_wait_for_bit(regmap, NAU83110_R19_INTR_STS,
 		BIT(2), 20, 20000);
 }
 
 static inline void nau83110_prot_int_enable(struct regmap *regmap, bool enable)
 {
-	regmap_update_bits(regmap, NAU83110_R17_INTR_CTRL1,
+	regmap_update_bits(regmap, NAU83110_R17_INTR_EN,
 		NAU83110_INT_PROT_EN, enable ? NAU83110_INT_PROT_EN : 0);
 }
 
 static inline void nau83110_hv_driver_enable(struct regmap *regmap, bool enable)
 {
-	regmap_update_bits(regmap, NAU83110_RBD_PWRSTAGE_CTRL2,
-		NAU83110_HVDRIVER_CTRL2, enable ? 0 : NAU83110_HVDRIVER_CTRL2);
+	regmap_update_bits(regmap, NAU83110_RBD_PWRSTAGE_HV_CTRL,
+		NAU83110_HVDRIVER, enable ? 0 : NAU83110_HVDRIVER);
 }
 
 static inline void nau83110_mute_enable(struct regmap *regmap, bool enable)
@@ -209,31 +208,31 @@ static int load_diagnostic(struct regmap *regmap)
 {
 	int bclk_status = 0;
 
-	regmap_write(regmap, NAU83110_RBB_PWRSTAGE_CTRL0, 0x810b);
-	regmap_write(regmap, NAU83110_RBC_PWRSTAGE_CTRL1, 0x0008);
+	regmap_write(regmap, NAU83110_RBB_PWRSTAGE_EN_CTRL, 0x810b);
+	regmap_write(regmap, NAU83110_RBC_PWRSTAGE_SELECT_CTRL, 0x0008);
 
 	/* OSC48M Enable */
 	nau83110_osc_enable(regmap, true);
 	/* Check BCLK status */
-	regmap_read(regmap, NAU83110_R1B_INTR_CTRL4, &bclk_status);
+	regmap_read(regmap, NAU83110_R1B_INTR_RSTS, &bclk_status);
 	if (bclk_status & NAU83110_BCLK_NO_BCLK)
 		msleep(100);
 
 	/* Diagnostic interrupt clear */
-	regmap_write(regmap, NAU83110_R19_INTR_CTRL3,
+	regmap_write(regmap, NAU83110_R19_INTR_STS,
 		NAU83110_INT_DIAG | NAU83110_INT_DIANDONE);
 	/* Trigger Load Diagnostic*/
-	regmap_update_bits(regmap, NAU83110_R6D_DIAG_CTRL0, NAU83110_DIAG_EN,
+	regmap_update_bits(regmap, NAU83110_R6D_DIAG_EN_CTRL, NAU83110_DIAG_EN,
 		NAU83110_DIAG_EN);
 	if (wait_diag_done(regmap))
 		goto timeout;
 
-	regmap_update_bits(regmap, NAU83110_R6D_DIAG_CTRL0, NAU83110_DIAG_EN, 0);
+	regmap_update_bits(regmap, NAU83110_R6D_DIAG_EN_CTRL, NAU83110_DIAG_EN, 0);
 	/* OSC48M Disable */
 	nau83110_osc_enable(regmap, false);
 
-	regmap_write(regmap, NAU83110_RBB_PWRSTAGE_CTRL0, 0xb90b);
-	regmap_write(regmap, NAU83110_RBC_PWRSTAGE_CTRL1, 0x3818);
+	regmap_write(regmap, NAU83110_RBB_PWRSTAGE_EN_CTRL, 0xb90b);
+	regmap_write(regmap, NAU83110_RBC_PWRSTAGE_SELECT_CTRL, 0x3818);
 
 	return 0;
 
@@ -293,8 +292,8 @@ static const struct snd_kcontrol_new nau83110_snd_controls[] = {
 	SOC_ENUM("DAC Oversampling Rate", nau83110_dac_osr_enum),
 	SOC_SINGLE("HPF Switch", NAU83110_R77_HPF_CTRL, NAU83110_HPF_EN_SFT, 1, 0),
 	SOC_SINGLE("HPF App Switch", NAU83110_R77_HPF_CTRL, NAU83110_HPF_APP_SFT, 1, 0),
-	SOC_SINGLE("DAC DEM Switch", NAU83110_R76_DAC_CTRL1, NAU83110_HPF_EN_SFT, 1, 1),
-	SOC_SINGLE("DAC DEM Delay Switch", NAU83110_R76_DAC_CTRL1,
+	SOC_SINGLE("DAC DEM Switch", NAU83110_R76_DAC_CTRL, NAU83110_HPF_EN_SFT, 1, 1),
+	SOC_SINGLE("DAC DEM Delay Switch", NAU83110_R76_DAC_CTRL,
 		NAU83110_HPF_APP_SFT, 1, 0),
  	SOC_SINGLE("DAC Zero Crossing Switch", NAU83110_R7A_MUTE_CTRL,
 		NAU83110_DACZCEN_SFT, 1, 0),
@@ -308,19 +307,19 @@ static const struct snd_kcontrol_new nau83110_snd_controls[] = {
 		NAU83110_ALCEN_SFT, 1, 0),
 	SOC_SINGLE("ALC Clip Detection Switch", NAU83110_R74_CLIP_CTRL,
 		NAU83110_CLIP_EN_SFT, 1, 0),
-	SOC_SINGLE("ALC Decay",	NAU83110_R5A_ALCDCY_CLIP, 0, 0x7fff, 0),
-	SOC_SINGLE("ALC Attack", NAU83110_R5B_ALCATK_CLIP, 0, 0x7fff, 0),
-	SOC_SINGLE("ALC Hold", NAU83110_R5C_ALCHLD_CLIP, 0, 0x7ff, 0),
+	SOC_SINGLE("ALC Decay",	NAU83110_R5A_ALC_DCY, 0, 0x7fff, 0),
+	SOC_SINGLE("ALC Attack", NAU83110_R5B_ALC_ATK_CLIP, 0, 0x7fff, 0),
+	SOC_SINGLE("ALC Hold", NAU83110_R5C_ALC_HLD_CLIP, 0, 0x7ff, 0),
 	SOC_SINGLE("ALC Min Gain", NAU83110_R5D_ALC_MINGAIN_CLIP, 8, 31, 0),
-	SOC_SINGLE("ALC Attack OTW2", NAU83110_R5F_ALCATK_OTW2, 0, 0x7fff, 0),
-	SOC_SINGLE("ALC Hold OTW2", NAU83110_R60_ALCHLD_OTW2, 0, 0x7ff, 0),
+	SOC_SINGLE("ALC Attack OTW2", NAU83110_R5F_ALC_ATK_OTW2, 0, 0x7fff, 0),
+	SOC_SINGLE("ALC Hold OTW2", NAU83110_R60_ALC_HLD_OTW2, 0, 0x7ff, 0),
 	SOC_SINGLE("ALC Min Gain OTW2", NAU83110_R61_ALC_MINGAIN_OTW2, 8, 31, 0),
-	SOC_SINGLE("ALC Attack OTW1", NAU83110_R63_ALCATK_OTW1, 0, 0x7fff, 0),
-	SOC_SINGLE("ALC Hold OTW1", NAU83110_R64_ALCHLD_OTW1, 0, 0x7ff, 0),
+	SOC_SINGLE("ALC Attack OTW1", NAU83110_R63_ALC_ATK_OTW1, 0, 0x7fff, 0),
+	SOC_SINGLE("ALC Hold OTW1", NAU83110_R64_ALC_HLD_OTW1, 0, 0x7ff, 0),
 	SOC_SINGLE("ALC Min Gain OTW1", NAU83110_R65_ALC_MINGAIN_OTW1, 8, 31, 0),
-	SOC_SINGLE("ALC Attack UVLOP", NAU83110_R67_ALCATK_UVLOP, 0, 0x7fff, 0),
-	SOC_SINGLE("ALC Hold UVLOP", NAU83110_R68_ALCHLD_UVLOP, 0, 0x7ff, 0),
-	SOC_SINGLE("ALC Min Gain UVLOP", NAU83110_R69_ALC_MINGAIN_STEP_UVLOP, 8, 31, 0),
+	SOC_SINGLE("ALC Attack UVLOP", NAU83110_R67_ALC_ATK_UVLOP, 0, 0x7fff, 0),
+	SOC_SINGLE("ALC Hold UVLOP", NAU83110_R68_ALC_HLD_UVLOP, 0, 0x7ff, 0),
+	SOC_SINGLE("ALC Min Gain UVLOP", NAU83110_R69_ALC_MINGAIN_UVLOP, 8, 31, 0),
 };
 
 static const struct snd_soc_dapm_widget nau83110_dapm_widgets[] = {
@@ -355,7 +354,7 @@ static void nau83110_diag_work(struct work_struct *work)
 	if (ret)
 		goto work_err;
 
-	ret = regmap_read(regmap, NAU83110_R19_INTR_CTRL3, &active_int);
+	ret = regmap_read(regmap, NAU83110_R19_INTR_STS, &active_int);
 	if (ret || (active_int & NAU83110_INT_DIAG)) {
 		dev_err(nau83110->dev, "load diag flag:%x", active_int);
 		goto work_err;
@@ -390,9 +389,9 @@ static void nau83110_trigger_work(struct work_struct *work)
 	case SNDRV_PCM_TRIGGER_START:
 	case SNDRV_PCM_TRIGGER_RESUME:
 	case SNDRV_PCM_TRIGGER_PAUSE_RELEASE:
-		regmap_update_bits(nau83110->regmap, NAU83110_R18_INTR_CTRL2,
+		regmap_update_bits(nau83110->regmap, NAU83110_R18_INTR_MASK,
 			NAU83110_COMMON_INT_MASK, 0);
-		regmap_write(nau83110->regmap, NAU83110_R19_INTR_CTRL3, 0xffff);
+		regmap_write(nau83110->regmap, NAU83110_R19_INTR_STS, 0xffff);
 
 		if (!nau83110->irq_enabled) {
 			enable_irq(nau83110->irq);
@@ -408,8 +407,8 @@ static void nau83110_trigger_work(struct work_struct *work)
 			nau83110->irq_enabled = false;
 		}
 
-		regmap_write(nau83110->regmap, NAU83110_R18_INTR_CTRL2, 0xffff);
-		regmap_write(nau83110->regmap, NAU83110_R19_INTR_CTRL3, 0xffff);
+		regmap_write(nau83110->regmap, NAU83110_R18_INTR_MASK, 0xffff);
+		regmap_write(nau83110->regmap, NAU83110_R19_INTR_STS, 0xffff);
 		break;
 	}
 }
@@ -468,7 +467,7 @@ static int nau83110_hw_params(struct snd_pcm_substream *substream,
 		goto err;
 	}
 
-	snd_soc_component_update_bits(component, NAU83110_R7C_TDM_RX_CTRL0,
+	snd_soc_component_update_bits(component, NAU83110_R7C_TDM_RX_MODE_CTRL,
 		NAU83110_WLEN_MASK, ctrl_val);
 
 	return 0;
@@ -525,9 +524,9 @@ static int nau83110_set_dai_fmt(struct snd_soc_dai *codec_dai, unsigned int fmt)
 		goto err;
 	}
 
-	snd_soc_component_update_bits(component, NAU83110_R7C_TDM_RX_CTRL0,
+	snd_soc_component_update_bits(component, NAU83110_R7C_TDM_RX_MODE_CTRL,
 		NAU83110_AIFMT_MASK | NAU83110_LRP0_MASK, ctrl0_val);
-	snd_soc_component_update_bits(component, NAU83110_R7D_TDM_RX_CTRL1,
+	snd_soc_component_update_bits(component, NAU83110_R7D_TDM_RX_SELECT_CTRL,
 		NAU83110_BCLK_INV, ctrl1_val);
 	return 0;
 err:
@@ -585,7 +584,7 @@ static int nau83110_set_tdm_slot(struct snd_soc_dai *dai, unsigned int tx_mask,
 
 	snd_soc_component_update_bits(component, NAU83110_R78_I2S_PCM_CTRL2,
 		NAU83110_PCM_TS_EN, NAU83110_PCM_TS_EN);
-	snd_soc_component_update_bits(component, NAU83110_R7D_TDM_RX_CTRL1,
+	snd_soc_component_update_bits(component, NAU83110_R7D_TDM_RX_SELECT_CTRL,
 		NAU83110_TDM_CH_SEL_MASK, ctrl0_val);
 
 	return 0;
@@ -675,14 +674,14 @@ static const struct snd_soc_component_driver nau83110_component_driver = {
 static int nau83110_init_regs(struct regmap *regmap)
 {
 	/* Interrupt Mask */
-	regmap_write(regmap, NAU83110_R18_INTR_CTRL2, 0xffff);
+	regmap_write(regmap, NAU83110_R18_INTR_MASK, 0xffff);
 	/* Interrupt Clear */
-	regmap_write(regmap, NAU83110_R19_INTR_CTRL3, 0x8002);
+	regmap_write(regmap, NAU83110_R19_INTR_STS, 0x8002);
 	/* Latch IIC ADDR value */
 	regmap_write(regmap, NAU83110_R02_I2C_ADDRESS_LATCH, 0x0001);
 	/* Analog Control */
-	regmap_write(regmap, NAU83110_RB6_ANALOG_CTRL0, 0x3e8f);
-	regmap_write(regmap, NAU83110_RB7_ANALOG_CTRL1, 0x0000);
+	regmap_write(regmap, NAU83110_RB6_ANALOG_GAIN_CTRL, 0x3e8f);
+	regmap_write(regmap, NAU83110_RB7_ANALOG_DACIN_CTRL, 0x0000);
 
 	/* OSC48M Enable */
 	nau83110_osc_enable(regmap, true);
@@ -698,18 +697,18 @@ static int nau83110_init_regs(struct regmap *regmap)
 	/* OSC48M Disable */
 	nau83110_osc_enable(regmap, false);
 
-	regmap_write(regmap, NAU83110_RBB_PWRSTAGE_CTRL0, 0xb90b);
-	regmap_write(regmap, NAU83110_RBC_PWRSTAGE_CTRL1, 0x3818);
+	regmap_write(regmap, NAU83110_RBB_PWRSTAGE_EN_CTRL, 0xb90b);
+	regmap_write(regmap, NAU83110_RBC_PWRSTAGE_SELECT_CTRL, 0x3818);
 
 	nau83110_hv_driver_enable(regmap, true);
 	nau83110_mute_enable(regmap, false);
 
 	/* TDM RX Control */
-	regmap_write(regmap, NAU83110_R7C_TDM_RX_CTRL0, 0x000a);
-	regmap_write(regmap, NAU83110_R7D_TDM_RX_CTRL1, 0x0000);
+	regmap_write(regmap, NAU83110_R7C_TDM_RX_MODE_CTRL, 0x000a);
+	regmap_write(regmap, NAU83110_R7D_TDM_RX_SELECT_CTRL, 0x0000);
 	/* TDM TX Control */
-	regmap_write(regmap, NAU83110_R80_TDM_TX_CTRL0, 0x0005);
-	regmap_write(regmap, NAU83110_R81_TDM_TX_CTRL1, 0x1801);
+	regmap_write(regmap, NAU83110_R80_TDM_TX_MODE_CTRL, 0x0005);
+	regmap_write(regmap, NAU83110_R81_TDM_TX_DATA_CTRL, 0x1801);
 
 	return 0;
 
@@ -724,7 +723,7 @@ static irqreturn_t nau83110_interrupt(int irq, void *data)
 	int active_int, clear_int = 0;
 	bool spk_short = false;
 
-	if (regmap_read(regmap, NAU83110_R19_INTR_CTRL3, &active_int))
+	if (regmap_read(regmap, NAU83110_R19_INTR_STS, &active_int))
 		return IRQ_NONE;
 
 	if (active_int == 0)
@@ -759,17 +758,17 @@ static irqreturn_t nau83110_interrupt(int irq, void *data)
 		spk_short = true;
 	}
 
-	if (active_int & NAU83110_INT_UVLOP) {
-		dev_dbg_ratelimited(nau83110->dev, "UVLOP occur");
-		clear_int |= NAU83110_INT_UVLOP;
+	if (active_int & NAU83110_INT_UVLO) {
+		dev_dbg_ratelimited(nau83110->dev, "UVLO occur");
+		clear_int |= NAU83110_INT_UVLO;
 	}
 
-	if (active_int & NAU83110_INT_OVLOB) {
-		dev_dbg_ratelimited(nau83110->dev, "OVLOB occur");
-		clear_int |= NAU83110_INT_OVLOB;
+	if (active_int & NAU83110_INT_OVLO) {
+		dev_dbg_ratelimited(nau83110->dev, "OVLO occur");
+		clear_int |= NAU83110_INT_OVLO;
 	}
 
-	regmap_write(regmap, NAU83110_R19_INTR_CTRL3, clear_int);
+	regmap_write(regmap, NAU83110_R19_INTR_STS, clear_int);
 
 	if (spk_short)
 		protect_work_start(nau83110);
@@ -809,14 +808,13 @@ static inline void nau83110_audio_reset(struct regmap *regmap)
 static int nau83110_i2c_probe(struct i2c_client *i2c)
 {
 	struct device *dev = &i2c->dev;
-	struct nau83110 *nau83110 = dev_get_platdata(dev);
+	struct nau83110 *nau83110;
 	int ret;
 
-	if (!nau83110) {
-		nau83110 = devm_kzalloc(dev, sizeof(*nau83110), GFP_KERNEL);
-		if (!nau83110)
-			return -ENOMEM;
-	}
+	nau83110 = devm_kzalloc(dev, sizeof(*nau83110), GFP_KERNEL);
+	if (!nau83110)
+		return -ENOMEM;
+
 	i2c_set_clientdata(i2c, nau83110);
 
 	nau83110->wq = alloc_workqueue("nau83110_wq", WQ_UNBOUND, 0);
@@ -869,14 +867,8 @@ static int nau83110_i2c_probe(struct i2c_client *i2c)
 			goto err_probe;
 	}
 
-	ret = devm_snd_soc_register_component(dev,
+	return devm_snd_soc_register_component(dev,
 		&nau83110_component_driver, &nau83110_dai, 1);
-	if (ret) {
-		dev_err_probe(dev, ret, "register component failed");
-		goto err_probe;
-	}
-	return 0;
-
 err_probe:
 	destroy_workqueue(nau83110->wq);
 	return ret;
@@ -898,17 +890,17 @@ static void nau83110_i2c_remove(struct i2c_client *i2c)
 
 static const struct i2c_device_id nau83110_i2c_id[] = {
 	{ "nau83110", 0 },
-	{ }
+	{ "nau83120", 0 },
+	{}
 };
 MODULE_DEVICE_TABLE(i2c, nau83110_i2c_id);
 
-#ifdef CONFIG_OF
 static const struct of_device_id nau83110_of_match[] = {
 	{ .compatible = "nuvoton,nau83110", },
-	{ }
+	{ .compatible = "nuvoton,nau83120", },
+	{}
 };
 MODULE_DEVICE_TABLE(of, nau83110_of_match);
-#endif
 
 static struct i2c_driver nau83110_i2c_driver = {
 	.driver = {
