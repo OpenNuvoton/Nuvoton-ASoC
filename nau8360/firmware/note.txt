@@ -1,0 +1,12 @@
+=======================================================================
+WARNING: PREVENT SPEAKER DAMAGE WHEN LOADING KCS FIRMWARE
+=======================================================================
+The NAU83G60 is a stereo 30W+30W smart amplifier with a DSP running the 
+KCS (Klippel Controlled Sound) algorithm. 
+
+Please double-check your speaker's maximum power rating (Wattage) before 
+applying the KCS firmware. Using a high-power firmware profile on 
+low-wattage speakers will cause the speakers to burn out or break.
+
+To prevent permanent hardware damage, please contact Nuvoton for 
+speaker-specific firmware tuning and validation.
