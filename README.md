@@ -13,7 +13,7 @@ x:none , o:ok (sync newest version)
 |NAU85L42                      |x      |x      |x      |x      |x      |x      |x      |x      |x      |o      |un-upstream     |
 |NAU88C10/NAU88C12/NAU88C14    |o      |o      |o      |o      |o      |o      |o      |o      |o      |o      |upstream at 4.9 |
 |NAU88L11                      |o      |o      |o      |o      |o      |o      |o      |o      |x      |x      |un-upstream     |
-|NAU88L21                      |o      |o      |o      |o      |o      |o      |o      |o      |x      |x      |upstream at 5.16|
+|NAU88L21                      |o      |o      |o      |o      |o      |o      |o      |o      |x      |o      |upstream at 5.16|
 |NAU88C22                      |o      |o      |o      |o      |o      |o      |o      |o      |x      |o      |upstream at 4.20|
 |NAU88L24                      |o      |o      |o      |o      |o      |o      |o      |o      |x      |x      |upstream at 4.12|
 |NAU88L25                      |o      |o      |o      |o      |o      |o      |o      |o      |x      |o      |upstream at 4.4 |
